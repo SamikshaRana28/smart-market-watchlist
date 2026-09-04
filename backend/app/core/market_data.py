@@ -393,6 +393,146 @@ def _parse_ohlcv(ticker_symbol: str, trading_days: int) -> list[dict[str, Any]] 
     return rows or None
 
 
+# Small curated set of frequently-searched names so autocomplete stays fast
+# and correct for the common case ("google" -> GOOGL, not a guess) even if
+# the live provider lookup is slow, rate-limited, or briefly unavailable.
+# This is a convenience layer only — it is merged with (and never blocks)
+# the live search below, so any real ticker is still reachable.
+_POPULAR_SYMBOLS: list[dict[str, str]] = [
+    {"symbol": "AAPL", "name": "Apple Inc.", "exchange": "NASDAQ"},
+    {"symbol": "MSFT", "name": "Microsoft Corporation", "exchange": "NASDAQ"},
+    {
+        "symbol": "GOOGL",
+        "name": "Alphabet Inc. (Class A)",
+        "exchange": "NASDAQ",
+        "aliases": ["google"],
+    },
+    {
+        "symbol": "GOOG",
+        "name": "Alphabet Inc. (Class C)",
+        "exchange": "NASDAQ",
+        "aliases": ["google"],
+    },
+    {"symbol": "AMZN", "name": "Amazon.com, Inc.", "exchange": "NASDAQ", "aliases": ["amazon"]},
+    {
+        "symbol": "META",
+        "name": "Meta Platforms, Inc.",
+        "exchange": "NASDAQ",
+        "aliases": ["facebook"],
+    },
+    {"symbol": "TSLA", "name": "Tesla, Inc.", "exchange": "NASDAQ"},
+    {"symbol": "NVDA", "name": "NVIDIA Corporation", "exchange": "NASDAQ"},
+    {"symbol": "NFLX", "name": "Netflix, Inc.", "exchange": "NASDAQ"},
+    {"symbol": "JPM", "name": "JPMorgan Chase & Co.", "exchange": "NYSE"},
+    {"symbol": "V", "name": "Visa Inc.", "exchange": "NYSE"},
+    {"symbol": "MA", "name": "Mastercard Incorporated", "exchange": "NYSE"},
+    {"symbol": "DIS", "name": "The Walt Disney Company", "exchange": "NYSE"},
+    {"symbol": "KO", "name": "The Coca-Cola Company", "exchange": "NYSE"},
+    {"symbol": "PEP", "name": "PepsiCo, Inc.", "exchange": "NASDAQ"},
+    {"symbol": "WMT", "name": "Walmart Inc.", "exchange": "NYSE"},
+    {"symbol": "COST", "name": "Costco Wholesale Corporation", "exchange": "NASDAQ"},
+    {"symbol": "INTC", "name": "Intel Corporation", "exchange": "NASDAQ"},
+    {"symbol": "AMD", "name": "Advanced Micro Devices, Inc.", "exchange": "NASDAQ"},
+    {"symbol": "ORCL", "name": "Oracle Corporation", "exchange": "NYSE"},
+    {"symbol": "CRM", "name": "Salesforce, Inc.", "exchange": "NYSE"},
+    {"symbol": "ADBE", "name": "Adobe Inc.", "exchange": "NASDAQ"},
+    {"symbol": "PYPL", "name": "PayPal Holdings, Inc.", "exchange": "NASDAQ"},
+    {"symbol": "UBER", "name": "Uber Technologies, Inc.", "exchange": "NYSE"},
+    {"symbol": "BA", "name": "The Boeing Company", "exchange": "NYSE"},
+    {"symbol": "XOM", "name": "Exxon Mobil Corporation", "exchange": "NYSE"},
+    {"symbol": "CVX", "name": "Chevron Corporation", "exchange": "NYSE"},
+    {"symbol": "PFE", "name": "Pfizer Inc.", "exchange": "NYSE"},
+    {"symbol": "JNJ", "name": "Johnson & Johnson", "exchange": "NYSE"},
+    {"symbol": "T", "name": "AT&T Inc.", "exchange": "NYSE"},
+    {"symbol": "SBUX", "name": "Starbucks Corporation", "exchange": "NASDAQ"},
+    {"symbol": "NKE", "name": "NIKE, Inc.", "exchange": "NYSE"},
+    {"symbol": "IBM", "name": "International Business Machines Corporation", "exchange": "NYSE"},
+    {"symbol": "SPY", "name": "SPDR S&P 500 ETF Trust", "exchange": "NYSE Arca"},
+    {"symbol": "QQQ", "name": "Invesco QQQ Trust", "exchange": "NASDAQ"},
+]
+
+
+def _public_entry(entry: dict[str, Any]) -> dict[str, str]:
+    return {"symbol": entry["symbol"], "name": entry["name"], "exchange": entry["exchange"]}
+
+
+def _local_symbol_matches(query: str, limit: int) -> list[dict[str, str]]:
+    """Match on ticker, official name, or common alias (e.g. "google" -> GOOGL).
+
+    Ranked prefix-first so typing the start of a name or symbol surfaces the
+    right ticker before looser substring hits.
+    """
+    q = query.strip().lower()
+    if not q:
+        return []
+    starts: list[dict[str, str]] = []
+    contains: list[dict[str, str]] = []
+    for entry in _POPULAR_SYMBOLS:
+        symbol_l = entry["symbol"].lower()
+        name_l = entry["name"].lower()
+        aliases_l = [a.lower() for a in entry.get("aliases", [])]
+        searchable = [symbol_l, name_l, *aliases_l]
+        if any(s.startswith(q) for s in searchable):
+            starts.append(_public_entry(entry))
+        elif any(q in s for s in searchable):
+            contains.append(_public_entry(entry))
+    return (starts + contains)[:limit]
+
+
+def _live_symbol_matches(query: str, limit: int) -> list[dict[str, str]]:
+    """Ask yfinance's search endpoint for live ticker matches.
+
+    Best-effort: autocomplete should never surface a 500 just because the
+    upstream lookup service is slow or unreachable, so any failure here
+    quietly yields no extra results instead of raising.
+    """
+    try:
+        results = yf.Search(query, max_results=limit).quotes  # type: ignore[attr-defined]
+    except Exception:
+        return []
+
+    matches: list[dict[str, str]] = []
+    for item in results or []:
+        symbol = (item.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        name = item.get("shortname") or item.get("longname") or symbol
+        exchange = item.get("exchDisp") or item.get("exchange") or ""
+        matches.append({"symbol": symbol, "name": name, "exchange": exchange})
+    return matches
+
+
+def search_symbols(query: str, limit: int = 8) -> list[dict[str, str]]:
+    """Ticker/company-name autocomplete for the "add symbol" box.
+
+    Merges the curated popular-name list (fast, always-correct for common
+    names like "google" or "apple") with a live provider lookup (covers the
+    long tail), de-duplicated by symbol and capped at `limit`.
+    """
+    q = query.strip()
+    if not q:
+        return []
+
+    limit = max(1, min(limit, 15))
+    combined: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for entry in _local_symbol_matches(q, limit):
+        if entry["symbol"] not in seen:
+            seen.add(entry["symbol"])
+            combined.append(entry)
+
+    if len(combined) < limit:
+        for entry in _live_symbol_matches(q, limit * 2):
+            if entry["symbol"] not in seen:
+                seen.add(entry["symbol"])
+                combined.append(entry)
+            if len(combined) >= limit:
+                break
+
+    return combined[:limit]
+
+
 def _bar_timestamp(idx: Any) -> tuple[str, str]:
     """Return (iso timestamp, calendar date) for a DatetimeIndex label."""
     iso = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
