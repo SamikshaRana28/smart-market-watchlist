@@ -1,122 +1,106 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { loadDashboardData } from './api.js'
+import ChangeCard from './components/ChangeCard.jsx'
+import Hero from './components/Hero.jsx'
+import WatchlistTable from './components/WatchlistTable.jsx'
+import { isMeaningful, sectorCorrelationBanners } from './format.js'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const payload = await loadDashboardData()
+      setData(payload)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load watchlist')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const changes = data?.changes ?? []
+  const meaningful = useMemo(() => changes.filter(isMeaningful), [changes])
+  const sectorBanners = useMemo(() => sectorCorrelationBanners(changes), [changes])
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
+    <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="flex justify-end">
         <button
           type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
+          onClick={refresh}
+          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
         >
-          Count is {count}
+          Refresh
         </button>
+      </div>
+
+      <Hero
+        loading={loading && !data}
+        changeCount={meaningful.length}
+        lastViewedAt={data?.last_viewed_at}
+        watchlistName={data?.watchlist?.name}
+        stale={data?.stale}
+        marketStatus={data?.market_status}
+        lastUpdated={data?.last_updated}
+      />
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Could not load market changes. {error}
+        </div>
+      )}
+
+      {sectorBanners.map((message) => (
+        <div
+          key={message}
+          className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950"
+          role="status"
+        >
+          {message}
+        </div>
+      ))}
+
+      <section>
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold text-zinc-900">Worth your attention</h2>
+          <p className="text-xs text-zinc-500">Sorted by Attention Score</p>
+        </div>
+        {loading && !data ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[0, 1, 2].map((key) => (
+              <div
+                key={key}
+                className="h-32 animate-pulse rounded-xl border border-zinc-200 bg-white"
+              />
+            ))}
+          </div>
+        ) : meaningful.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-zinc-200 bg-white px-4 py-6 text-sm text-zinc-500">
+            Nothing unusual versus your last visit. Full list is below.
+          </p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {meaningful.map((row) => (
+              <ChangeCard key={row.symbol} row={row} />
+            ))}
+          </div>
+        )}
       </section>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      {loading && !data ? (
+        <div className="h-48 animate-pulse rounded-2xl border border-zinc-200 bg-white" />
+      ) : (
+        <WatchlistTable rows={changes} />
+      )}
+    </main>
   )
 }
-
-export default App
