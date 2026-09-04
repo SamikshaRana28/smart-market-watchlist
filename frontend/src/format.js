@@ -120,6 +120,37 @@ export function changeCountLabel(count) {
   return count === 1 ? '1 change' : `${count} changes`
 }
 
+/**
+ * One aggregate sentence for the Hero: how many stocks are flagged this
+ * comparison, or — if none crossed the classification line but the whole
+ * list is jumpier than usual — a volatility-framed line instead. Returns
+ * null when there is nothing worth a headline yet (e.g. first visit, or a
+ * quiet day with nothing to say).
+ */
+export function watchlistSummaryLine(rows) {
+  const compared = rows.filter((row) => row.status === 'compared')
+  if (compared.length === 0) return null
+
+  const flaggedCount = compared.filter((row) => MEANINGFUL_LABELS.has(row.attention_label)).length
+
+  if (flaggedCount > 0) {
+    const total = rows.length
+    return `${flaggedCount} of ${total} stock${total === 1 ? '' : 's'} flagged today — unusually active week.`
+  }
+
+  const zScores = compared
+    .map((row) => row.z_score)
+    .filter((value) => value != null && !Number.isNaN(value))
+  if (zScores.length === 0) return null
+
+  const avgAbsZ = zScores.reduce((sum, value) => sum + Math.abs(value), 0) / zScores.length
+  if (avgAbsZ > 1.2) {
+    return 'Your watchlist volatility is up this week.'
+  }
+
+  return null
+}
+
 const SECTOR_SHORT_NAME = {
   technology: 'tech',
   'information technology': 'tech',

@@ -9,6 +9,7 @@ export default function Hero({
   stale,
   marketStatus,
   lastUpdated,
+  summaryLine,
 }) {
   const when = lastViewedAt
     ? new Date(lastViewedAt).toLocaleString(undefined, {
@@ -40,6 +41,9 @@ export default function Hero({
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">
             Welcome back, {changeCountLabel(changeCount)} since your last visit
           </h1>
+          {summaryLine && (
+            <p className="mt-1 text-sm font-medium text-zinc-700">{summaryLine}</p>
+          )}
           <p className="mt-2 text-sm text-zinc-500">
             {when
               ? `Prior snapshot ${when}. Ranked by Attention Score.`
