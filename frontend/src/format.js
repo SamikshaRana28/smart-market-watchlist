@@ -175,6 +175,46 @@ export function sectorCorrelationBanners(rows) {
     })
 }
 
+/**
+ * Human sentence for a long-absence digest, built from the backend's
+ * `summary` object (build_summary in snapshot_diff.py). Returns null when
+ * `summary.is_digest` is false — the normal per-row cards/table are enough
+ * for a short gap, no need for a rolled-up banner.
+ */
+export function digestSentence(summary) {
+  if (!summary || !summary.is_digest) return null
+
+  const days = summary.days_since_last_visit
+  const away =
+    days == null
+      ? 'You were away for a while'
+      : days < 1
+        ? 'You were away less than a day'
+        : `You were away ${Math.round(days)} day${Math.round(days) === 1 ? '' : 's'}`
+
+  const parts = []
+  const { counts, total_flagged: totalFlagged } = summary
+  if (totalFlagged > 0) {
+    const pieces = []
+    if (counts.significant) pieces.push(`${counts.significant} significant`)
+    if (counts.important) pieces.push(`${counts.important} important`)
+    if (counts.moderate) pieces.push(`${counts.moderate} moderate`)
+    parts.push(`${pieces.join(', ')} change${totalFlagged === 1 ? '' : 's'}`)
+  } else {
+    parts.push('nothing unusual')
+  }
+
+  let sentence = `${away}. ${parts[0]}.`
+
+  if (summary.top_mover) {
+    const { symbol, price_return: priceReturn } = summary.top_mover
+    const pct = priceReturn != null ? ` (${formatPercent(priceReturn)})` : ''
+    sentence += ` Biggest mover: ${symbol}${pct}.`
+  }
+
+  return sentence
+}
+
 export function formatWhen(iso) {
   if (!iso) return null
   const date = new Date(iso)

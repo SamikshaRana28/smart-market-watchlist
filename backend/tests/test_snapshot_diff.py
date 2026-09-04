@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.snapshot_diff import (
     apply_sector_flags,
+    build_summary,
     diff_symbol,
     rank_changes,
     select_comparison_snapshot,
@@ -122,6 +123,75 @@ class TestSelectComparisonSnapshot(unittest.TestCase):
     def test_empty(self) -> None:
         now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
         self.assertIsNone(select_comparison_snapshot([], now=now))
+
+
+def _compared_row(symbol, *, label, score, sector="", flag_type="stock_specific", price_return=0.01):
+    return {
+        "symbol": symbol,
+        "sector": sector,
+        "status": "compared",
+        "attention_score": score,
+        "attention_label": label,
+        "flag_type": flag_type,
+        "price_return": price_return,
+    }
+
+
+class TestBuildSummary(unittest.TestCase):
+    def test_counts_by_label_and_total_flagged(self) -> None:
+        rows = [
+            _compared_row("AAPL", label="significant", score=92.0),
+            _compared_row("MSFT", label="moderate", score=41.0),
+            _compared_row("JPM", label="normal", score=8.0),
+            {"symbol": "TSLA", "status": "tracking_started_today", "attention_score": None},
+        ]
+        now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        summary = build_summary(rows, previous_viewed=now - timedelta(hours=6), now=now)
+        self.assertEqual(summary["counts"], {"significant": 1, "important": 0, "moderate": 1, "normal": 1})
+        # tracking_started_today rows are excluded from total_compared / total_flagged
+        self.assertEqual(summary["total_compared"], 3)
+        self.assertEqual(summary["total_flagged"], 2)
+
+    def test_top_mover_is_highest_attention_score(self) -> None:
+        rows = [
+            _compared_row("AAPL", label="moderate", score=41.0, price_return=0.02),
+            _compared_row("NVDA", label="significant", score=92.0, price_return=0.08),
+        ]
+        now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        summary = build_summary(rows, previous_viewed=now - timedelta(hours=1), now=now)
+        self.assertEqual(summary["top_mover"]["symbol"], "NVDA")
+        self.assertEqual(summary["top_mover"]["attention_score"], 92.0)
+
+    def test_no_scored_rows_top_mover_is_none(self) -> None:
+        rows = [{"symbol": "AAPL", "status": "tracking_started_today", "attention_score": None}]
+        now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        summary = build_summary(rows, previous_viewed=None, now=now)
+        self.assertIsNone(summary["top_mover"])
+        self.assertIsNone(summary["days_since_last_visit"])
+        self.assertFalse(summary["is_digest"])
+
+    def test_sector_groups_deduplicated_and_sorted(self) -> None:
+        rows = [
+            _compared_row("AAPL", label="significant", score=90.0, sector="Technology", flag_type="sector_correlation"),
+            _compared_row("MSFT", label="important", score=70.0, sector="Technology", flag_type="sector_correlation"),
+            _compared_row("JPM", label="moderate", score=40.0, sector="Financials", flag_type="sector_correlation"),
+        ]
+        now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        summary = build_summary(rows, previous_viewed=now - timedelta(hours=2), now=now)
+        self.assertEqual(summary["sector_groups"], ["Financials", "Technology"])
+
+    def test_is_digest_true_after_threshold_days(self) -> None:
+        rows = [_compared_row("AAPL", label="moderate", score=41.0)]
+        now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        summary = build_summary(rows, previous_viewed=now - timedelta(days=5), now=now)
+        self.assertTrue(summary["is_digest"])
+        self.assertAlmostEqual(summary["days_since_last_visit"], 5.0, places=1)
+
+    def test_is_digest_false_within_threshold(self) -> None:
+        rows = [_compared_row("AAPL", label="moderate", score=41.0)]
+        now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        summary = build_summary(rows, previous_viewed=now - timedelta(hours=6), now=now)
+        self.assertFalse(summary["is_digest"])
 
 
 if __name__ == "__main__":

@@ -112,7 +112,9 @@ import { loadDashboardData } from './api.js'
 import ChangeCard from './components/ChangeCard.jsx'
 import Hero from './components/Hero.jsx'
 import WatchlistTable from './components/WatchlistTable.jsx'
-import { isMeaningful, sectorCorrelationBanners } from './format.js'
+import { digestSentence, isMeaningful, sectorCorrelationBanners, watchlistSummaryLine } from './format.js'
+
+const DIGEST_COLLAPSE_COUNT = 5
 
 const SENSITIVITY_OPTIONS = [
   { value: 'conservative', label: 'Conservative' },
@@ -125,6 +127,7 @@ export default function App() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [sensitivity, setSensitivity] = useState('balanced')
+  const [showAllMeaningful, setShowAllMeaningful] = useState(false)
 
   const refresh = useCallback(async (nextSensitivity) => {
     setLoading(true)
@@ -152,6 +155,19 @@ export default function App() {
   const changes = data?.changes ?? []
   const meaningful = useMemo(() => changes.filter(isMeaningful), [changes])
   const sectorBanners = useMemo(() => sectorCorrelationBanners(changes), [changes])
+  const summaryLine = useMemo(() => watchlistSummaryLine(changes), [changes])
+  const digestLine = useMemo(() => digestSentence(data?.summary), [data?.summary])
+  const isDigest = Boolean(data?.summary?.is_digest)
+
+  // Long absence (edge case: user returns after weeks) — don't flood the
+  // dashboard with every flagged stock, show a handful and let them expand.
+  const visibleMeaningful =
+    isDigest && !showAllMeaningful ? meaningful.slice(0, DIGEST_COLLAPSE_COUNT) : meaningful
+  const hiddenCount = meaningful.length - visibleMeaningful.length
+
+  useEffect(() => {
+    setShowAllMeaningful(false)
+  }, [data?.watchlist_id, data?.viewed_at])
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
@@ -187,6 +203,8 @@ export default function App() {
         stale={data?.stale}
         marketStatus={data?.market_status}
         lastUpdated={data?.last_updated}
+        summaryLine={summaryLine}
+        digestLine={digestLine}
       />
 
       {error && (
@@ -224,11 +242,22 @@ export default function App() {
             Nothing unusual versus your last visit. Full list is below.
           </p>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {meaningful.map((row) => (
-              <ChangeCard key={row.symbol} row={row} />
-            ))}
-          </div>
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {visibleMeaningful.map((row) => (
+                <ChangeCard key={row.symbol} row={row} />
+              ))}
+            </div>
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAllMeaningful(true)}
+                className="mt-3 w-full rounded-lg border border-dashed border-zinc-300 bg-white px-4 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
+              >
+                Show {hiddenCount} more flagged stock{hiddenCount === 1 ? '' : 's'}
+              </button>
+            )}
+          </>
         )}
       </section>
 

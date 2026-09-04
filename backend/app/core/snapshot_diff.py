@@ -152,6 +152,68 @@ def apply_sector_flags(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     return tagged
 
 
+def build_summary(
+    rows: Sequence[dict[str, Any]],
+    *,
+    previous_viewed: datetime | None,
+    now: datetime,
+    digest_threshold_days: float = 3.0,
+) -> dict[str, Any]:
+    """One aggregate view of this comparison.
+
+    Counts by classification, the single biggest mover, which sectors moved
+    together, and whether this visit is "long enough since last time" that
+    the dashboard should show a rolled-up digest instead of listing every
+    row individually (the "user returns after 20 days" edge case — summarize
+    instead of flooding).
+    """
+    compared = [row for row in rows if row.get("status") == "compared"]
+
+    counts = {"significant": 0, "important": 0, "moderate": 0, "normal": 0}
+    for row in compared:
+        label = row.get("attention_label")
+        if label in counts:
+            counts[label] += 1
+    total_flagged = counts["significant"] + counts["important"] + counts["moderate"]
+
+    top_mover = None
+    scored = [row for row in compared if row.get("attention_score") is not None]
+    if scored:
+        top = max(scored, key=lambda row: row["attention_score"])
+        top_mover = {
+            "symbol": top["symbol"],
+            "attention_score": top["attention_score"],
+            "attention_label": top["attention_label"],
+            "price_return": top.get("price_return"),
+        }
+
+    sector_groups = sorted(
+        {
+            row["sector"]
+            for row in compared
+            if row.get("flag_type") == "sector_correlation" and row.get("sector")
+        }
+    )
+
+    days_since_last_visit = None
+    if previous_viewed is not None:
+        prev = previous_viewed if previous_viewed.tzinfo else previous_viewed.replace(tzinfo=timezone.utc)
+        now_aware = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        days_since_last_visit = round((now_aware - prev).total_seconds() / 86400, 2)
+
+    is_digest = days_since_last_visit is not None and days_since_last_visit >= digest_threshold_days
+
+    return {
+        "total_compared": len(compared),
+        "total_flagged": total_flagged,
+        "counts": counts,
+        "top_mover": top_mover,
+        "sector_groups": sector_groups,
+        "days_since_last_visit": days_since_last_visit,
+        "is_digest": is_digest,
+    }
+
+
 def rank_changes(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     """Sort by attention_score descending; unscored rows (first visit) go last."""
 

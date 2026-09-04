@@ -14,6 +14,7 @@ from app.core.change_engine import DEFAULT_THRESHOLDS, SENSITIVITY_PRESETS
 from app.core.market_data import fetch_ohlcv_status, set_debug_overrides, us_equity_market_status
 from app.core.snapshot_diff import (
     apply_sector_flags,
+    build_summary,
     diff_symbol,
     rank_changes,
     select_comparison_snapshot,
@@ -332,6 +333,7 @@ def get_watchlist_changes(
 
     ranked = rank_changes(apply_sector_flags(rows))
     previous_viewed = watchlist.last_viewed_at
+    summary = build_summary(ranked, previous_viewed=previous_viewed, now=now)
     watchlist.last_viewed_at = now
     db.commit()
 
@@ -340,6 +342,7 @@ def get_watchlist_changes(
         "user_id": watchlist.user_id,
         "last_viewed_at": previous_viewed.isoformat() if previous_viewed else None,
         "viewed_at": now.isoformat(),
+        "summary": summary,
         "stale": any(bool(row.get("stale")) for row in ranked),
         "last_updated": max(
             (row["last_updated"] for row in ranked if row.get("last_updated")),
