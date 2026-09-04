@@ -69,20 +69,27 @@ export function formatScore(score) {
   return Number(score).toFixed(1)
 }
 
-export function oneLineReason(row) {
+/**
+ * Picks the single dominant driver behind a row's Attention Score (or a
+ * fixed status reason for first-visit / unavailable / sector-flagged rows).
+ * Shared by oneLineReason() (text) and reasonIcon() (badge) so the two
+ * never disagree about which signal is "the" reason.
+ */
+export function dominantSignal(row) {
   if (row.status === 'tracking_started_today') {
-    return 'Tracking started today — comparison next visit'
+    return { type: 'first_visit', text: 'Tracking started today — comparison next visit' }
   }
   if (row.status === 'market_data_unavailable') {
-    return 'Market data unavailable'
+    return { type: 'unavailable', text: 'Market data unavailable' }
   }
   if (row.flag_type === 'sector_correlation') {
-    return 'Sector-wide move — peers unusual the same day'
+    return { type: 'sector', text: 'Sector-wide move — peers unusual the same day' }
   }
 
   const breakdown = row.breakdown ?? {}
   const candidates = [
     {
+      type: 'volume',
       score: breakdown.volume_score ?? 0,
       text:
         row.volume_ratio != null
@@ -90,6 +97,7 @@ export function oneLineReason(row) {
           : null,
     },
     {
+      type: 'breakout',
       score: breakdown.z_score_normalized ?? 0,
       text:
         row.z_score != null
@@ -97,6 +105,7 @@ export function oneLineReason(row) {
           : null,
     },
     {
+      type: 'breakout',
       score: breakdown.price_score ?? 0,
       text:
         row.price_return != null
@@ -104,6 +113,7 @@ export function oneLineReason(row) {
           : null,
     },
     {
+      type: 'volatility',
       score: breakdown.volatility_score ?? 0,
       text:
         row.volatility_ratio != null
@@ -113,7 +123,27 @@ export function oneLineReason(row) {
   ].filter((item) => item.text)
 
   candidates.sort((a, b) => b.score - a.score)
-  return candidates[0]?.text ?? 'Move is within the recent baseline'
+  const top = candidates[0]
+  return top ? { type: top.type, text: top.text } : { type: 'none', text: 'Move is within the recent baseline' }
+}
+
+export function oneLineReason(row) {
+  return dominantSignal(row).text
+}
+
+const REASON_ICONS = {
+  first_visit: null,
+  unavailable: null,
+  sector: '🔗',
+  volume: '🔊',
+  breakout: '📈',
+  volatility: '📊',
+  none: null,
+}
+
+/** Emoji badge (or null) for the same signal oneLineReason() describes in words. */
+export function reasonIcon(row) {
+  return REASON_ICONS[dominantSignal(row).type] ?? null
 }
 
 export function changeCountLabel(count) {

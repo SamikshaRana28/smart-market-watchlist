@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { formatPercent, formatPrice, formatScore, oneLineReason, styleFor } from '../format.js'
+import { formatPercent, formatPrice, formatScore, oneLineReason, reasonIcon, styleFor } from '../format.js'
 import DataStatusBadge from './DataStatusBadge.jsx'
 
 export default function ChangeCard({ row }) {
@@ -29,7 +29,14 @@ export default function ChangeCard({ row }) {
               size="xs"
             />
           </div>
-          <p className="mt-2 text-sm leading-snug text-zinc-600">{oneLineReason(row)}</p>
+          <p className="mt-2 flex items-start gap-1.5 text-sm leading-snug text-zinc-600">
+            {reasonIcon(row) && (
+              <span aria-hidden className="leading-snug">
+                {reasonIcon(row)}
+              </span>
+            )}
+            <span>{oneLineReason(row)}</span>
+          </p>
         </div>
         <div className="text-right">
           <p className="font-mono text-sm font-medium text-zinc-900">

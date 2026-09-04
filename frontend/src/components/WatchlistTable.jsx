@@ -5,6 +5,7 @@ import {
   formatScore,
   formatVolume,
   oneLineReason,
+  reasonIcon,
   styleFor,
 } from '../format.js'
 import DataStatusBadge from './DataStatusBadge.jsx'
@@ -83,6 +84,7 @@ export default function WatchlistTable({ rows, onRemove }) {
                     </span>
                   </td>
                   <td className="max-w-xs truncate px-5 py-3 text-zinc-600">
+                    {reasonIcon(row) && <span aria-hidden>{reasonIcon(row)} </span>}
                     {oneLineReason(row)}
                   </td>
                   {onRemove && (
