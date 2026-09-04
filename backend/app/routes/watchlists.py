@@ -59,6 +59,11 @@ class StockAdd(BaseModel):
     sector: str = ""
 
 
+class AlertSettingsUpdate(BaseModel):
+    enabled: bool
+    threshold: float | None = Field(default=None, ge=0, le=100)
+
+
 def _normalize_symbol(symbol: str) -> str:
     return symbol.strip().upper()
 
@@ -135,6 +140,23 @@ def _quote_from_bars(symbol: str, bars: list[dict]) -> dict:
     }
 
 
+def _triggered_alerts(watchlist: Watchlist, ranked: list[dict]) -> list[str]:
+    """Symbols whose Attention Score meets/exceeds this watchlist's Alert
+    Threshold on this comparison. Empty whenever alerts are off or no
+    threshold is set — App.jsx only fires a browser Notification for
+    symbols in this list, so returning [] here means "stay silent".
+    """
+    if not watchlist.alerts_enabled or watchlist.alert_threshold is None:
+        return []
+    return [
+        row["symbol"]
+        for row in ranked
+        if row.get("status") == "compared"
+        and row.get("attention_score") is not None
+        and row["attention_score"] >= watchlist.alert_threshold
+    ]
+
+
 def _snapshot_payload(row: MarketSnapshot) -> dict:
     ts = row.timestamp
     return {
@@ -176,6 +198,25 @@ def list_watchlists(user_id: int = DEFAULT_USER_ID, db: Session = Depends(get_db
         .order_by(Watchlist.id)
     ).scalars().all()
     return [_serialize_watchlist(row) for row in rows]
+
+
+@router.patch("/{watchlist_id}/alert-settings")
+def update_alert_settings(
+    watchlist_id: int, body: AlertSettingsUpdate, db: Session = Depends(get_db)
+):
+    """Persist the watchlist-level Alert Threshold (see Watchlist.alerts_enabled).
+
+    `threshold` may be omitted/null — e.g. the toggle is being switched off
+    without touching whatever number was last entered. Notification.requestPermission()
+    happens client-side in AlertSettings.jsx before this is ever called, so this
+    endpoint only owns the stored preference, not the browser permission itself.
+    """
+    watchlist = _watchlist_or_404(db, watchlist_id)
+    watchlist.alerts_enabled = body.enabled
+    watchlist.alert_threshold = body.threshold
+    db.commit()
+    db.refresh(watchlist)
+    return _serialize_watchlist(watchlist)
 
 
 @router.post("/{watchlist_id}/stocks")
@@ -354,6 +395,9 @@ def get_watchlist_changes(
             if sensitivity and sensitivity.strip().lower() in SENSITIVITY_PRESETS
             else "balanced"
         ),
+        "alerts_enabled": watchlist.alerts_enabled,
+        "alert_threshold": watchlist.alert_threshold,
+        "triggered_alerts": _triggered_alerts(watchlist, ranked),
         "changes": ranked,
     }
 
@@ -366,6 +410,8 @@ def _serialize_watchlist(watchlist: Watchlist) -> dict:
         "last_viewed_at": (
             watchlist.last_viewed_at.isoformat() if watchlist.last_viewed_at else None
         ),
+        "alerts_enabled": watchlist.alerts_enabled,
+        "alert_threshold": watchlist.alert_threshold,
         "symbols": [
             {
                 "symbol": item.symbol,
