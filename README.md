@@ -52,6 +52,14 @@ whose reasoning can't be explained on demand.
 - **Context badges** — 🔊 volume spike / 📈 breakout / 📊 volatility /
   🔗 sector correlation icons next to each row's explanation, so the
   *why* is scannable at a glance, not just readable
+- **Multiple watchlists per user** — switcher in the header, persisted
+  via `?watchlist=` in the URL and localStorage so it survives a reload
+- **Symbol search/autocomplete** — type a ticker or a company name (e.g.
+  "google") when adding a stock; matches a curated name list plus a live
+  `yfinance` lookup, so you don't need to already know the exact ticker
+- **Attention Score alerts** — per-watchlist threshold; when a symbol's
+  score crosses it on a visit, a browser notification fires (Notification
+  API, foreground only — no server-side push)
 
 ## Stack
 
@@ -82,7 +90,7 @@ backend/
     routes/
       watchlists.py          # CRUD + /changes (the core endpoint)
       market.py               # /market/{symbol}, /market/{symbol}/ohlcv
-  tests/                     # 48 unit tests, no DB/network required
+  tests/                     # 52 unit tests, no DB/network required
 
 frontend/
   src/
@@ -93,7 +101,10 @@ frontend/
       Hero.jsx               # headline + digest summary line
       ChangeCard.jsx          # ranked card view with context badges
       WatchlistTable.jsx      # full sortable table with context badges
+      WatchlistSwitcher.jsx    # multi-watchlist tabs + "new watchlist" form
       AddStockForm.jsx
+      SymbolAutocomplete.jsx   # ticker/company-name search dropdown
+      AlertSettings.jsx        # Attention Score alert threshold + browser notifications
       DataStatusBadge.jsx      # "Last traded" / "Data delayed" badge
       PriceChart.jsx
     pages/
@@ -129,7 +140,7 @@ required to demo.
 
 ## Testing
 
-### Backend (48 tests, no DB or network needed)
+### Backend (52 tests, no DB or network needed)
 ```bash
 cd backend
 python -m unittest discover tests -v
@@ -156,14 +167,15 @@ responsiveness).
 
 ## Possible next steps
 
-- Multiple watchlists per user (switcher/dropdown — schema already
-  supports it, just needs a UI selector)
-- Symbol search/autocomplete when adding a stock, instead of typing the
-  exact ticker
-- Price/score alert thresholds (notify when a symbol crosses a chosen
-  Attention Score)
 - Swap SQLite → Postgres + add a second market-data provider as a
   fallback for true multi-user scale
+- Real auth (JWT) — schema is already multi-user shaped (`user_id` on
+  every watchlist), so this is additive, not a redesign
+- Sector resolved from a symbol-metadata provider instead of user-entered
+  free text
+- Server-side alerting (email/SMS/push) instead of foreground-only
+  browser notifications, so a threshold crossing is caught even when the
+  tab isn't open
 
 ## Roadmap
 
