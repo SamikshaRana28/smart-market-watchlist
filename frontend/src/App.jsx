@@ -1,8 +1,9 @@
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { addStock, createWatchlist, loadDashboardData, removeStock } from './api.js'
+import { addStock, createWatchlist, loadDashboardData, removeStock, updateAlertSettings } from './api.js'
 import AddStockForm from './components/AddStockForm.jsx'
+import AlertSettings from './components/AlertSettings.jsx'
 import ChangeCard from './components/ChangeCard.jsx'
 import Hero from './components/Hero.jsx'
 import WatchlistSwitcher from './components/WatchlistSwitcher.jsx'
@@ -112,6 +113,15 @@ export default function App() {
     [watchlistId, refresh, sensitivity],
   )
 
+  const handleSaveAlertSettings = useCallback(
+    async ({ enabled, threshold }) => {
+      if (!watchlistId) return
+      await updateAlertSettings(watchlistId, { enabled, threshold })
+      await refresh(sensitivity, String(watchlistId))
+    },
+    [watchlistId, refresh, sensitivity],
+  )
+
   const changes = data?.changes ?? []
   const meaningful = useMemo(() => changes.filter(isMeaningful), [changes])
   const sectorBanners = useMemo(() => sectorCorrelationBanners(changes), [changes])
@@ -130,6 +140,34 @@ export default function App() {
   }, [data?.watchlist_id, data?.viewed_at])
 
   const isEmpty = !loading && Boolean(data) && changes.length === 0
+
+  // Real browser push (Notification API, foreground): fire once per fetch —
+  // `viewed_at` changes on every /changes call, so gate on it rather than on
+  // `changes` identity, which would refire on unrelated re-renders.
+  const notifiedViewedAtRef = useRef(null)
+  useEffect(() => {
+    if (!data?.alerts_enabled) return
+    if (!data.viewed_at || data.viewed_at === notifiedViewedAtRef.current) return
+    notifiedViewedAtRef.current = data.viewed_at
+
+    const triggered = data.triggered_alerts ?? []
+    if (!triggered.length) return
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (Notification.permission !== 'granted') return
+
+    const rowsBySymbol = new Map(changes.map((row) => [row.symbol, row]))
+    triggered.forEach((symbol) => {
+      const row = rowsBySymbol.get(symbol)
+      const score = row?.attention_score != null ? Math.round(row.attention_score) : null
+      new Notification(`${symbol} crossed your alert threshold`, {
+        body:
+          score != null
+            ? `Attention Score ${score} on ${data.watchlist?.name ?? 'your watchlist'}.`
+            : `New meaningful move on ${data.watchlist?.name ?? 'your watchlist'}.`,
+        tag: `alert-${data.watchlist?.id}-${symbol}`,
+      })
+    })
+  }, [data, changes])
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
@@ -163,6 +201,11 @@ export default function App() {
           >
             Refresh
           </button>
+          <AlertSettings
+            watchlist={data?.watchlist}
+            onSave={handleSaveAlertSettings}
+            disabled={!watchlistId}
+          />
         </div>
       </div>
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -22,6 +22,12 @@ class Watchlist(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # Watchlist-level Alert Threshold: fires a browser notification (foreground,
+    # Notification API — see AlertSettings.jsx) when any symbol's Attention
+    # Score crosses this value. `alert_threshold` is on the same 0-100 scale
+    # as attention_score; None means "not configured yet".
+    alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    alert_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     items: Mapped[list[WatchlistItem]] = relationship(
         "WatchlistItem",

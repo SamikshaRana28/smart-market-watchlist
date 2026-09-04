@@ -68,6 +68,13 @@ export function removeStock(watchlistId, symbol) {
   })
 }
 
+export function updateAlertSettings(watchlistId, { enabled, threshold }) {
+  return request(`/watchlists/${watchlistId}/alert-settings`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled, threshold: threshold ?? null }),
+  })
+}
+
 export function fetchWatchlistChanges(watchlistId, sensitivity) {
   const query = sensitivity ? `?sensitivity=${encodeURIComponent(sensitivity)}` : ''
   return request(`/watchlists/${watchlistId}/changes${query}`)
