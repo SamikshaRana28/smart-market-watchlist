@@ -111,8 +111,22 @@ async function request(path, options) {
     ...options,
   })
   if (!response.ok) {
-    const detail = await response.text()
-    throw new Error(detail || `${response.status} ${response.statusText}`)
+    const raw = await response.text()
+    // FastAPI errors come back as {"detail": "..."} — surface just the
+    // message so a duplicate-symbol or validation error reads cleanly in
+    // the UI instead of showing raw JSON.
+    let message = raw
+    try {
+      const parsed = JSON.parse(raw)
+      if (typeof parsed?.detail === 'string') {
+        message = parsed.detail
+      } else if (Array.isArray(parsed?.detail)) {
+        message = parsed.detail.map((item) => item.msg).filter(Boolean).join('; ')
+      }
+    } catch {
+      // not JSON — fall back to the raw text below
+    }
+    throw new Error(message || `${response.status} ${response.statusText}`)
   }
   return response.json()
 }
@@ -125,6 +139,19 @@ export function createWatchlist(payload) {
   return request('/watchlists', {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export function addStock(watchlistId, { symbol, sector }) {
+  return request(`/watchlists/${watchlistId}/stocks`, {
+    method: 'POST',
+    body: JSON.stringify({ symbol, sector: sector ?? '' }),
+  })
+}
+
+export function removeStock(watchlistId, symbol) {
+  return request(`/watchlists/${watchlistId}/stocks/${encodeURIComponent(symbol)}`, {
+    method: 'DELETE',
   })
 }
 

@@ -15,7 +15,7 @@ function statusLabel(row) {
   return styleFor(row.attention_label).label
 }
 
-export default function WatchlistTable({ rows }) {
+export default function WatchlistTable({ rows, onRemove }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
       <div className="flex items-baseline justify-between border-b border-zinc-100 px-5 py-4">
@@ -33,6 +33,7 @@ export default function WatchlistTable({ rows }) {
               <th className="px-3 py-2.5 font-medium">Score</th>
               <th className="px-3 py-2.5 font-medium">Flag</th>
               <th className="px-5 py-2.5 font-medium">Why</th>
+              {onRemove && <th className="px-3 py-2.5 font-medium" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
@@ -84,6 +85,18 @@ export default function WatchlistTable({ rows }) {
                   <td className="max-w-xs truncate px-5 py-3 text-zinc-600">
                     {oneLineReason(row)}
                   </td>
+                  {onRemove && (
+                    <td className="px-3 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => onRemove(row.symbol)}
+                        aria-label={`Remove ${row.symbol} from watchlist`}
+                        className="rounded-md px-2 py-1 text-xs font-medium text-zinc-400 hover:bg-red-50 hover:text-red-600"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  )}
                 </tr>
               )
             })}
