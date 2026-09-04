@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import SymbolAutocomplete from './SymbolAutocomplete.jsx'
 
 const SECTOR_OPTIONS = [
   '',
@@ -41,14 +42,12 @@ export default function AddStockForm({ onAdd, disabled }) {
       onSubmit={handleSubmit}
       className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200 bg-white p-3"
     >
-      <input
-        type="text"
+      <SymbolAutocomplete
         value={symbol}
-        onChange={(event) => setSymbol(event.target.value)}
-        placeholder="Add symbol (e.g. TSLA)"
-        maxLength={16}
+        onChange={setSymbol}
         disabled={disabled || submitting}
-        className="min-w-[10rem] flex-1 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+        placeholder="Add symbol (e.g. TSLA, or type a company name)"
+        inputClassName="w-full rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300"
       />
       <select
         value={sector}

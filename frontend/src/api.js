@@ -83,6 +83,12 @@ export function fetchOhlcv(symbol, range) {
   )
 }
 
+export function searchSymbols(query, { signal } = {}) {
+  const q = query.trim()
+  if (!q) return Promise.resolve({ results: [] })
+  return request(`/market/search?q=${encodeURIComponent(q)}`, { signal })
+}
+
 const DEMO_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'JPM']
 
 // Resolves which watchlist to show. Prefers `preferredId` (comes from the

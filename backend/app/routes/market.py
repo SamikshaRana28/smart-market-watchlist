@@ -6,6 +6,7 @@ from app.core.market_data import (
     OHLCV_RANGES,
     fetch_ohlcv_range_status,
     fetch_quote,
+    search_symbols,
     set_debug_overrides,
 )
 
@@ -22,6 +23,23 @@ def _apply_debug(
         force_stale=force_stale,
         force_market=force_market,
     )
+
+
+@router.get("/search")
+def get_symbol_search(
+    q: str = Query("", min_length=0, max_length=64, description="Ticker or company name"),
+    limit: int = Query(8, ge=1, le=15),
+):
+    """Ticker/company-name autocomplete for the "add symbol" box.
+
+    Registered before /{symbol} so a literal request to /market/search is
+    never swallowed by the single-symbol route below. Empty query returns an
+    empty result list rather than an error, since the frontend calls this on
+    every keystroke and a blank box shouldn't be a client error.
+    """
+    if not q.strip():
+        return {"results": []}
+    return {"results": search_symbols(q, limit=limit)}
 
 
 @router.get("/{symbol}/ohlcv")
