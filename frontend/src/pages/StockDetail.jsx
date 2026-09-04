@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { loadSymbolDetail } from '../api.js'
 import PriceChart from '../components/PriceChart.jsx'
 import DataStatusBadge from '../components/DataStatusBadge.jsx'
@@ -16,6 +16,11 @@ const RANGES = ['1D', '1W', '1M', '3M', '1Y']
 
 export default function StockDetail() {
   const { symbol: rawSymbol } = useParams()
+  const [searchParams] = useSearchParams()
+  // Carries over from the dashboard's `?watchlist=` param (set by the
+  // watchlist switcher) so the delta/chart shown here match whichever
+  // watchlist the user was actually looking at.
+  const watchlistId = searchParams.get('watchlist')
   const symbol = (rawSymbol ?? '').toUpperCase()
   const [range, setRange] = useState('1M')
   const [chartType, setChartType] = useState('candle')
@@ -29,7 +34,7 @@ export default function StockDetail() {
       setLoading(true)
       setError(null)
       try {
-        const data = await loadSymbolDetail(symbol, range)
+        const data = await loadSymbolDetail(symbol, range, watchlistId)
         if (!cancelled) setPayload(data)
       } catch (err) {
         if (!cancelled) {
@@ -44,7 +49,7 @@ export default function StockDetail() {
     return () => {
       cancelled = true
     }
-  }, [symbol, range])
+  }, [symbol, range, watchlistId])
 
   useEffect(() => {
     setChartType(range === '1D' ? 'line' : 'candle')
