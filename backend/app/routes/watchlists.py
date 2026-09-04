@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.baseline import get_baseline
+from app.core.change_engine import DEFAULT_THRESHOLDS, SENSITIVITY_PRESETS
 from app.core.market_data import fetch_ohlcv_status, set_debug_overrides, us_equity_market_status
 from app.core.snapshot_diff import (
     apply_sector_flags,
@@ -21,6 +22,18 @@ from app.db import get_db
 from app.models import MarketSnapshot, Watchlist, WatchlistItem
 
 DEFAULT_USER_ID = 1
+
+
+def _thresholds_for(sensitivity: str | None) -> tuple[float, float, float]:
+    """Map a sensitivity query param to a threshold preset.
+
+    Falls back to Balanced (the existing 30/60/80 default) for a missing or
+    unrecognized value instead of erroring — an invalid param should never
+    break the dashboard.
+    """
+    if not sensitivity:
+        return DEFAULT_THRESHOLDS
+    return SENSITIVITY_PRESETS.get(sensitivity.strip().lower(), DEFAULT_THRESHOLDS)
 
 # Demo / seed tickers often have an empty WatchlistItem.sector. Fill those so
 # calculate_sector_correlation can actually group names on this comparison.
@@ -256,18 +269,23 @@ def get_watchlist_changes(
     force_fail: bool = Query(False),
     force_stale: bool = Query(False),
     force_market: str | None = Query(None),
+    sensitivity: str | None = Query(None),
 ):
     """Compare last snapshots to live data and return Attention Scores, ranked.
 
     First time a symbol is seen for this user it is tagged `tracking_started_today`
     instead of scoring a fake move from an empty baseline. A new snapshot is stored
     after the comparison so the next visit has a real prior price/volume.
+
+    `sensitivity` (conservative | balanced | aggressive) shifts the
+    classify_attention cutoffs; missing or invalid values fall back to balanced.
     """
     set_debug_overrides(
         force_fail=force_fail,
         force_stale=force_stale,
         force_market=force_market,
     )
+    thresholds = _thresholds_for(sensitivity)
     watchlist = _watchlist_or_404(db, watchlist_id)
     items = list(watchlist.items)
     symbols = [item.symbol for item in items]
@@ -294,6 +312,7 @@ def get_watchlist_changes(
             quote=quote,
             baseline=baseline,
             current_bar=bars[-1] if bars else None,
+            thresholds=thresholds,
         )
         row["stale"] = bundle["stale"]
         row["last_updated"] = bundle["last_updated"]
@@ -327,6 +346,11 @@ def get_watchlist_changes(
             default=None,
         ),
         "market_status": us_equity_market_status(now),
+        "sensitivity": (
+            sensitivity.strip().lower()
+            if sensitivity and sensitivity.strip().lower() in SENSITIVITY_PRESETS
+            else "balanced"
+        ),
         "changes": ranked,
     }
 
