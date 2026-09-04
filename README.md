@@ -57,9 +57,10 @@ whose reasoning can't be explained on demand.
 - **Symbol search/autocomplete** — type a ticker or a company name (e.g.
   "google") when adding a stock; matches a curated name list plus a live
   `yfinance` lookup, so you don't need to already know the exact ticker
-- **Attention Score alerts** — per-watchlist threshold; when a symbol's
-  score crosses it on a visit, a browser notification fires (Notification
-  API, foreground only — no server-side push)
+- **Attention Score alerts** — per-watchlist threshold, persisted server-side
+  (`Watchlist.alerts_enabled` / `alert_threshold`); when a symbol's score
+  crosses it on a visit, a browser notification fires (Notification API,
+  foreground only — no server-side push)
 
 ## Stack
 
@@ -85,12 +86,12 @@ backend/
       change_engine.py       # Attention Score math, sector correlation, sensitivity presets
       snapshot_diff.py       # snapshot vs current → per-row change + summary
       baseline.py            # 24h rolling baseline (Redis-cached)
-      market_data.py         # yfinance wrapper: retries, circuit breaker, stale/closed detection
+      market_data.py         # yfinance wrapper: retries, circuit breaker, stale/closed detection, symbol search
     models/                  # SQLAlchemy models (Watchlist, WatchlistItem, MarketSnapshot)
     routes/
-      watchlists.py          # CRUD + /changes (the core endpoint)
-      market.py               # /market/{symbol}, /market/{symbol}/ohlcv
-  tests/                     # 52 unit tests, no DB/network required
+      watchlists.py          # CRUD + /changes (the core endpoint) + alert-settings
+      market.py               # /market/{symbol}, /market/{symbol}/ohlcv, /market/search
+  tests/                     # 58 unit tests, no DB/network required
 
 frontend/
   src/
@@ -140,7 +141,7 @@ required to demo.
 
 ## Testing
 
-### Backend (52 tests, no DB or network needed)
+### Backend (58 tests, no DB or network needed)
 ```bash
 cd backend
 python -m unittest discover tests -v
@@ -164,6 +165,10 @@ responsiveness).
 - **Sector is user-entered**, not pulled from a reference dataset —
   fine for a hackathon demo; a production version would resolve sector
   from a symbol-metadata provider instead of trusting free-text input.
+- **Alerts are foreground-only.** The Notification API only fires while
+  the tab is open — a threshold crossing while the tab is closed is
+  missed. The threshold itself is still persisted server-side per
+  watchlist, so this is a delivery-channel limitation, not a data one.
 
 ## Possible next steps
 

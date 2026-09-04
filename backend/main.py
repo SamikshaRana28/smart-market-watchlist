@@ -23,7 +23,7 @@ app.include_router(watchlists_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # tighten this before production
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
