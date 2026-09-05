@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.baseline import get_baseline
@@ -100,7 +100,12 @@ def _recent_snapshots(
 def _recent_snapshots_bulk(
     db: Session, user_id: int, symbols: list[str], limit: int = 2
 ) -> dict[str, list[MarketSnapshot]]:
-    """Last `limit` snapshots per symbol (most recent first), in one query.
+    """Last `limit` snapshots per symbol (most recent first), in one bounded query.
+
+    Uses a ROW_NUMBER() window partitioned by symbol so this stays cheap
+    regardless of how much history has piled up — a symbol polled every 45s
+    by the frontend's auto-refresh for weeks still costs one indexed lookup
+    here, not a full-history fetch for that symbol sliced down in Python.
 
     Lets GET /watchlists/{id}/changes apply the same "skip a too-fresh
     snapshot" guard the stock-detail route already uses (see
@@ -111,14 +116,29 @@ def _recent_snapshots_bulk(
     """
     if not symbols:
         return {}
+
+    ranked = (
+        select(
+            MarketSnapshot.id,
+            func.row_number()
+            .over(
+                partition_by=MarketSnapshot.symbol,
+                order_by=MarketSnapshot.timestamp.desc(),
+            )
+            .label("rn"),
+        )
+        .where(
+            MarketSnapshot.user_id == user_id,
+            MarketSnapshot.symbol.in_(symbols),
+        )
+        .subquery()
+    )
     rows = (
         db.execute(
             select(MarketSnapshot)
-            .where(
-                MarketSnapshot.user_id == user_id,
-                MarketSnapshot.symbol.in_(symbols),
-            )
-            .order_by(MarketSnapshot.symbol, MarketSnapshot.timestamp.desc())
+            .join(ranked, MarketSnapshot.id == ranked.c.id)
+            .where(ranked.c.rn <= limit)
+            .order_by(MarketSnapshot.symbol, ranked.c.rn)
         )
         .scalars()
         .all()
@@ -126,7 +146,7 @@ def _recent_snapshots_bulk(
     grouped: dict[str, list[MarketSnapshot]] = {}
     for row in rows:
         grouped.setdefault(row.symbol, []).append(row)
-    return {symbol: entries[:limit] for symbol, entries in grouped.items()}
+    return grouped
 
 
 def _quote_from_bars(symbol: str, bars: list[dict]) -> dict:
