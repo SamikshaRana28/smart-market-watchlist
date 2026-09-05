@@ -61,6 +61,11 @@ whose reasoning can't be explained on demand.
   (`Watchlist.alerts_enabled` / `alert_threshold`); when a symbol's score
   crosses it on a visit, a browser notification fires (Notification API,
   foreground only — no server-side push)
+- **Background auto-refresh** — polls `/changes` every 45s while the tab is
+  visible (pauses when hidden or while a manual load is in flight), fails
+  silently rather than showing an error on a missed poll, and still fires
+  Attention Score alerts on each tick — so the dashboard stays current, and
+  a threshold crossing is caught, without the user hitting Refresh
 
 ## Stack
 
