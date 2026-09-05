@@ -28,6 +28,8 @@ from app.core.market_data import (
     fetch_ohlcv_status,
     set_debug_overrides,
     us_equity_market_status,
+    market_status_for_symbol,
+    currency_for_symbol,
 )
 from app.core.snapshot_diff import (
     apply_sector_flags,
@@ -341,6 +343,7 @@ def get_stock_detail(
     change["stale"] = bundle["stale"]
     change["last_updated"] = bundle["last_updated"]
     change["market_status"] = bundle["market_status"]
+    change["currency"] = bundle.get("currency", currency_for_symbol(symbol))
 
     return {
         "watchlist_id": watchlist.id,
@@ -420,7 +423,8 @@ def get_watchlist_changes(
                 "bars": None,
                 "stale": True,
                 "last_updated": None,
-                "market_status": us_equity_market_status(now),
+                "market_status": market_status_for_symbol(symbol, now),
+                "currency": currency_for_symbol(symbol),
                 "sources_disagree": False,
             }
         bars = bundle.get("bars")
@@ -440,6 +444,7 @@ def get_watchlist_changes(
         row["stale"] = bundle["stale"]
         row["last_updated"] = bundle["last_updated"]
         row["market_status"] = bundle["market_status"]
+        row["currency"] = bundle.get("currency", currency_for_symbol(symbol))
         row["sources_disagree"] = bundle.get("sources_disagree", False)
         rows.append(row)
 

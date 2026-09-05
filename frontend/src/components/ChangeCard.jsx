@@ -40,7 +40,7 @@ export default function ChangeCard({ row }) {
         </div>
         <div className="text-right">
           <p className="font-mono text-sm font-medium text-zinc-900">
-            {formatPrice(row.current_price)}
+            {formatPrice(row.current_price, row.currency)}
           </p>
           <p
             className={`font-mono text-sm font-medium ${

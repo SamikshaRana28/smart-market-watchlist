@@ -52,7 +52,7 @@ export default function WatchlistTable({ rows, onRemove }) {
                     </Link>
                   </td>
                   <td className="px-3 py-3 font-mono tabular-nums text-zinc-800">
-                    <div>{formatPrice(row.current_price)}</div>
+                    <div>{formatPrice(row.current_price, row.currency)}</div>
                     <div className="mt-1">
                       <DataStatusBadge
                         stale={row.stale}

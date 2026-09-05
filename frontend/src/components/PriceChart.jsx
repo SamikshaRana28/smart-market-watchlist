@@ -67,23 +67,23 @@ function ChartTooltip({ active, payload, chartType }) {
       {chartType === 'candle' ? (
         <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono text-zinc-600">
           <dt>O</dt>
-          <dd>{formatPrice(bar.open)}</dd>
+          <dd>{formatPrice(bar.open, currency)}</dd>
           <dt>H</dt>
-          <dd>{formatPrice(bar.high)}</dd>
+          <dd>{formatPrice(bar.high, currency)}</dd>
           <dt>L</dt>
-          <dd>{formatPrice(bar.low)}</dd>
+          <dd>{formatPrice(bar.low, currency)}</dd>
           <dt>C</dt>
-          <dd>{formatPrice(bar.close)}</dd>
+          <dd>{formatPrice(bar.close, currency)}</dd>
         </dl>
       ) : (
-        <p className="mt-1 font-mono text-zinc-800">{formatPrice(bar.close)}</p>
+        <p className="mt-1 font-mono text-zinc-800">{formatPrice(bar.close, currency)}</p>
       )}
       <p className="mt-1 text-zinc-500">Vol {formatVolume(bar.volume)}</p>
     </div>
   )
 }
 
-export default function PriceChart({ bars, range, chartType }) {
+export default function PriceChart({ bars, range, chartType, currency = 'USD' }) {
   const data = (bars ?? []).map((bar, i) => {
     const ts = new Date(bar.timestamp)
     const fullLabel = Number.isNaN(ts.getTime())

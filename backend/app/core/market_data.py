@@ -33,6 +33,10 @@ _EASTERN = ZoneInfo("America/New_York")
 _SESSION_OPEN = dt_time(9, 30)
 _SESSION_CLOSE = dt_time(16, 0)
 
+_INDIA = ZoneInfo("Asia/Kolkata")
+_NSE_SESSION_OPEN = dt_time(9, 15)
+_NSE_SESSION_CLOSE = dt_time(15, 30)
+
 # Chart ranges for the stock detail page. 1D falls back to a few sessions of
 # intraday bars when the current calendar day has no prints yet (pre-open).
 OHLCV_RANGES: dict[str, dict[str, str]] = {
@@ -129,22 +133,68 @@ def us_equity_market_status(now: datetime | None = None) -> MarketStatus:
     return "closed"
 
 
+def nse_equity_market_status(now: datetime | None = None) -> MarketStatus:
+    """Regular NSE session: weekdays 9:15am–3:30pm Asia/Kolkata (end exclusive).
+
+    Ignores public holidays (NSE closes for several each year that a plain
+    weekday check won't catch) — a reasonable simplification for a watchlist
+    app, not a trading system.
+    """
+    override = debug_force_market.get() or os.getenv("STOCKLYTIC_FORCE_MARKET_STATUS")
+    if override in ("open", "closed"):
+        return override  # type: ignore[return-value]
+
+    instant = _aware(now) if now else _now()
+    local = instant.astimezone(_INDIA)
+    if local.weekday() >= 5:
+        return "closed"
+    clock = local.time()
+    if _NSE_SESSION_OPEN <= clock < _NSE_SESSION_CLOSE:
+        return "open"
+    return "closed"
+
+
+def is_nse_symbol(symbol: str) -> bool:
+    """True for NSE/BSE-listed tickers (the ``.NS`` / ``.BO`` suffix yfinance
+    uses for Indian exchanges, e.g. ``TCS.NS``, ``RELIANCE.NS``)."""
+    ticker = (symbol or "").strip().upper()
+    return ticker.endswith(".NS") or ticker.endswith(".BO")
+
+
+def currency_for_symbol(symbol: str) -> str:
+    """ISO currency code to format a symbol's price in."""
+    return "INR" if is_nse_symbol(symbol) else "USD"
+
+
+def market_status_for_symbol(symbol: str, now: datetime | None = None) -> MarketStatus:
+    """Picks the right exchange session (NSE vs US) based on the ticker."""
+    if is_nse_symbol(symbol):
+        return nse_equity_market_status(now)
+    return us_equity_market_status(now)
+
+
 def freshness_fields(
     fetched_at: datetime | None,
     *,
+    symbol: str,
     from_cache: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """stale / last_updated / market_status for API envelopes.
+    """stale / last_updated / market_status / currency for API envelopes.
+
+    `market_status` and `currency` are picked per-symbol (NSE session + INR
+    for a ``.NS``/``.BO`` ticker, US session + USD otherwise) so an Indian
+    and a US name in the same watchlist are each judged against their own
+    exchange's hours rather than one session assumed for everything.
 
     `stale` is true when:
     - we are serving circuit-breaker cache, or
-    - the US session is open and the payload is older than 5 minutes, or
+    - the symbol's home session is open and the payload is older than 5 minutes, or
     - a debug override forces it.
     Last close while the session is shut is not treated as delayed.
     """
     instant = _aware(now) if now else _now()
-    status = us_equity_market_status(instant)
+    status = market_status_for_symbol(symbol, instant)
     fetched = _aware(fetched_at) if fetched_at else None
     stale = False
     if debug_force_stale.get() or os.getenv("STOCKLYTIC_FORCE_STALE", "").lower() in {
@@ -164,6 +214,7 @@ def freshness_fields(
         "stale": stale,
         "last_updated": fetched.isoformat() if fetched else None,
         "market_status": status,
+        "currency": currency_for_symbol(symbol),
         "sources_disagree": sources_disagree_forced(),
     }
 
@@ -254,7 +305,7 @@ def _guarded(
     if _circuit_is_open(ticker, now):
         cached, fetched_at = read_cache()
         if cached is not None:
-            return cached, freshness_fields(fetched_at, from_cache=True, now=now)
+            return cached, freshness_fields(fetched_at, symbol=ticker, from_cache=True, now=now)
         raise RuntimeError(
             f"Market data circuit open for {ticker} and no cached payload is available"
         )
@@ -265,16 +316,16 @@ def _guarded(
         _record_failure(ticker, now)
         cached, fetched_at = read_cache()
         if cached is not None:
-            return cached, freshness_fields(fetched_at, from_cache=True, now=now)
+            return cached, freshness_fields(fetched_at, symbol=ticker, from_cache=True, now=now)
         raise
 
     if payload is None:
-        return None, freshness_fields(None, from_cache=False, now=now)
+        return None, freshness_fields(None, symbol=ticker, from_cache=False, now=now)
 
     _record_success(ticker)
     write_cache(payload)
     _, fetched_at = read_cache()
-    return payload, freshness_fields(fetched_at, from_cache=False, now=now)
+    return payload, freshness_fields(fetched_at, symbol=ticker, from_cache=False, now=now)
 
 
 def fetch_quote(symbol: str) -> dict[str, Any] | None:
@@ -463,6 +514,26 @@ _POPULAR_SYMBOLS: list[dict[str, str]] = [
     {"symbol": "IBM", "name": "International Business Machines Corporation", "exchange": "NYSE"},
     {"symbol": "SPY", "name": "SPDR S&P 500 ETF Trust", "exchange": "NYSE Arca"},
     {"symbol": "QQQ", "name": "Invesco QQQ Trust", "exchange": "NASDAQ"},
+    # NSE (India) — the .NS suffix is what yfinance expects for these tickers.
+    {"symbol": "RELIANCE.NS", "name": "Reliance Industries", "exchange": "NSE"},
+    {"symbol": "TCS.NS", "name": "Tata Consultancy Services", "exchange": "NSE"},
+    {"symbol": "INFY.NS", "name": "Infosys", "exchange": "NSE"},
+    {"symbol": "HDFCBANK.NS", "name": "HDFC Bank", "exchange": "NSE"},
+    {"symbol": "ICICIBANK.NS", "name": "ICICI Bank", "exchange": "NSE"},
+    {"symbol": "AXISBANK.NS", "name": "Axis Bank", "exchange": "NSE"},
+    {"symbol": "HINDUNILVR.NS", "name": "Hindustan Unilever", "exchange": "NSE"},
+    {"symbol": "ITC.NS", "name": "ITC Limited", "exchange": "NSE"},
+    {"symbol": "TATAMOTORS.NS", "name": "Tata Motors", "exchange": "NSE"},
+    {"symbol": "WIPRO.NS", "name": "Wipro", "exchange": "NSE"},
+    {"symbol": "HCLTECH.NS", "name": "HCL Technologies", "exchange": "NSE"},
+    {"symbol": "LTIM.NS", "name": "LTIMindtree", "exchange": "NSE"},
+    {"symbol": "BAJAJ-AUTO.NS", "name": "Bajaj Auto", "exchange": "NSE"},
+    {"symbol": "CIPLA.NS", "name": "Cipla", "exchange": "NSE"},
+    {"symbol": "DRREDDY.NS", "name": "Dr. Reddy's Laboratories", "exchange": "NSE"},
+    {"symbol": "NESTLEIND.NS", "name": "Nestle India", "exchange": "NSE"},
+    {"symbol": "SUNPHARMA.NS", "name": "Sun Pharmaceutical", "exchange": "NSE"},
+    {"symbol": "DABUR.NS", "name": "Dabur India", "exchange": "NSE"},
+    {"symbol": "IDEA.NS", "name": "Vodafone Idea", "exchange": "NSE"},
 ]
 
 

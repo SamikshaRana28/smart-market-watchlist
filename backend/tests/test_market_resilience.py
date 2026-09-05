@@ -46,7 +46,7 @@ class TestStale(unittest.TestCase):
     def test_stale_during_session_after_five_minutes(self) -> None:
         now = datetime(2026, 9, 2, 11, 0, tzinfo=ET)
         fetched = now - timedelta(minutes=6)
-        fields = md.freshness_fields(fetched, from_cache=False, now=now)
+        fields = md.freshness_fields(fetched, symbol="AAPL", from_cache=False, now=now)
         self.assertTrue(fields["stale"])
         self.assertEqual(fields["market_status"], "open")
         self.assertIsNotNone(fields["last_updated"])
@@ -54,20 +54,20 @@ class TestStale(unittest.TestCase):
     def test_fresh_during_session(self) -> None:
         now = datetime(2026, 9, 2, 11, 0, tzinfo=ET)
         fetched = now - timedelta(minutes=1)
-        fields = md.freshness_fields(fetched, from_cache=False, now=now)
+        fields = md.freshness_fields(fetched, symbol="AAPL", from_cache=False, now=now)
         self.assertFalse(fields["stale"])
 
     def test_old_print_not_stale_when_session_closed(self) -> None:
         now = datetime(2026, 9, 5, 12, 0, tzinfo=ET)
         fetched = now - timedelta(hours=20)
-        fields = md.freshness_fields(fetched, from_cache=False, now=now)
+        fields = md.freshness_fields(fetched, symbol="AAPL", from_cache=False, now=now)
         self.assertFalse(fields["stale"])
         self.assertEqual(fields["market_status"], "closed")
 
     def test_cache_fallback_is_stale(self) -> None:
         now = datetime(2026, 9, 5, 12, 0, tzinfo=ET)
         fetched = now - timedelta(minutes=1)
-        fields = md.freshness_fields(fetched, from_cache=True, now=now)
+        fields = md.freshness_fields(fetched, symbol="AAPL", from_cache=True, now=now)
         self.assertTrue(fields["stale"])
 
 

@@ -82,7 +82,7 @@ export default function StockDetail() {
               <DataStatusBadge stale={stale} marketStatus={marketStatus} />
             </div>
             <p className="mt-1 font-mono text-xl text-zinc-800">
-              {formatPrice(change?.current_price)}
+              {formatPrice(change?.current_price, change?.currency)}
             </p>
             <p className="mt-0.5 text-xs text-zinc-500">
               {stale
@@ -147,7 +147,7 @@ export default function StockDetail() {
         {loading && !bars.length ? (
           <div className="h-80 animate-pulse rounded-xl bg-zinc-100" />
         ) : (
-          <PriceChart bars={bars} range={range} chartType={chartType} />
+          <PriceChart bars={bars} range={range} chartType={chartType} currency={change?.currency} />
         )}
       </section>
 
@@ -165,11 +165,11 @@ export default function StockDetail() {
             <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
               <div>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Prior price</dt>
-                <dd className="mt-1 font-mono text-zinc-900">{formatPrice(change?.previous_price)}</dd>
+                <dd className="mt-1 font-mono text-zinc-900">{formatPrice(change?.previous_price, change?.currency)}</dd>
               </div>
               <div>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Now</dt>
-                <dd className="mt-1 font-mono text-zinc-900">{formatPrice(change?.current_price)}</dd>
+                <dd className="mt-1 font-mono text-zinc-900">{formatPrice(change?.current_price, change?.currency)}</dd>
               </div>
               <div>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Delta</dt>

@@ -39,11 +39,17 @@ export function isMeaningful(row) {
   return row.status === 'compared' && MEANINGFUL_LABELS.has(row.attention_label)
 }
 
-export function formatPrice(value) {
+const CURRENCY_LOCALES = {
+  USD: 'en-US',
+  INR: 'en-IN',
+}
+
+export function formatPrice(value, currency = 'USD') {
   if (value == null || Number.isNaN(value)) return '—'
-  return new Intl.NumberFormat('en-US', {
+  const code = currency || 'USD'
+  return new Intl.NumberFormat(CURRENCY_LOCALES[code] ?? 'en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency: code,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)
