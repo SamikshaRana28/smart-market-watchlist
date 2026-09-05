@@ -58,7 +58,7 @@ function CandleLayer({ data }) {
   )
 }
 
-function ChartTooltip({ active, payload, chartType }) {
+function ChartTooltip({ active, payload, chartType, currency }) {
   if (!active || !payload?.length) return null
   const bar = payload[0].payload
   return (
@@ -140,7 +140,7 @@ export default function PriceChart({ bars, range, chartType, currency = 'USD' })
               Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 })
             }
           />
-          <Tooltip content={<ChartTooltip chartType={chartType} />} />
+          <Tooltip content={<ChartTooltip chartType={chartType} currency={currency} />} />
           <Line
             type="monotone"
             dataKey="close"
