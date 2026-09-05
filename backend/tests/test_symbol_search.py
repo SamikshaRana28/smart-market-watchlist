@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+from app.core import market_data as md
 from app.core.market_data import search_symbols
 
 
 class TestSearchSymbols(unittest.TestCase):
+    def setUp(self) -> None:
+        # search_symbols() falls through to a real yf.Search() network call
+        # whenever the curated local list doesn't fill the requested limit.
+        # These tests only care about the local-match/ranking/dedup logic,
+        # so the live lookup is patched out everywhere in this file — keeps
+        # the suite's "no network required" guarantee true and these tests
+        # fast and deterministic regardless of connectivity.
+        patcher = patch.object(md, "_live_symbol_matches", return_value=[])
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
     def test_empty_query_returns_empty_list(self) -> None:
         self.assertEqual(search_symbols(""), [])
         self.assertEqual(search_symbols("   "), [])
