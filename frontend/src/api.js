@@ -1,5 +1,10 @@
 
-const API_BASE = import.meta.env.VITE_API_URL ?? ''
+// Falls back to the standard local backend port when VITE_API_URL isn't
+// set (e.g. a fresh clone with no .env yet) — without this, a missing
+// .env silently sends every request to the Vite dev server itself
+// instead of the API, which looks like a broken app rather than a
+// missing config file.
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
 function debugQuery() {
   if (typeof window === 'undefined') return ''

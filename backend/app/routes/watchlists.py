@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.baseline import get_baseline
@@ -79,35 +79,6 @@ def _watchlist_or_404(db: Session, watchlist_id: int) -> Watchlist:
     return watchlist
 
 
-def _latest_snapshots(
-    db: Session, user_id: int, symbols: list[str]
-) -> dict[str, MarketSnapshot]:
-    if not symbols:
-        return {}
-
-    latest = (
-        select(
-            MarketSnapshot.symbol,
-            func.max(MarketSnapshot.timestamp).label("max_ts"),
-        )
-        .where(
-            MarketSnapshot.user_id == user_id,
-            MarketSnapshot.symbol.in_(symbols),
-        )
-        .group_by(MarketSnapshot.symbol)
-        .subquery()
-    )
-    rows = db.execute(
-        select(MarketSnapshot).join(
-            latest,
-            (MarketSnapshot.user_id == user_id)
-            & (MarketSnapshot.symbol == latest.c.symbol)
-            & (MarketSnapshot.timestamp == latest.c.max_ts),
-        )
-    ).scalars().all()
-    return {row.symbol: row for row in rows}
-
-
 def _recent_snapshots(
     db: Session, user_id: int, symbol: str, limit: int = 2
 ) -> list[MarketSnapshot]:
@@ -124,6 +95,38 @@ def _recent_snapshots(
         .scalars()
         .all()
     )
+
+
+def _recent_snapshots_bulk(
+    db: Session, user_id: int, symbols: list[str], limit: int = 2
+) -> dict[str, list[MarketSnapshot]]:
+    """Last `limit` snapshots per symbol (most recent first), in one query.
+
+    Lets GET /watchlists/{id}/changes apply the same "skip a too-fresh
+    snapshot" guard the stock-detail route already uses (see
+    select_comparison_snapshot). Without this, every call to /changes —
+    including a background auto-refresh poll or a quick double-click on
+    Refresh — silently resets "since your last visit" to a few seconds
+    ago, and every Attention Score collapses toward zero.
+    """
+    if not symbols:
+        return {}
+    rows = (
+        db.execute(
+            select(MarketSnapshot)
+            .where(
+                MarketSnapshot.user_id == user_id,
+                MarketSnapshot.symbol.in_(symbols),
+            )
+            .order_by(MarketSnapshot.symbol, MarketSnapshot.timestamp.desc())
+        )
+        .scalars()
+        .all()
+    )
+    grouped: dict[str, list[MarketSnapshot]] = {}
+    for row in rows:
+        grouped.setdefault(row.symbol, []).append(row)
+    return {symbol: entries[:limit] for symbol, entries in grouped.items()}
 
 
 def _quote_from_bars(symbol: str, bars: list[dict]) -> dict:
@@ -336,7 +339,7 @@ def get_watchlist_changes(
         for item in items
     }
 
-    snapshots = _latest_snapshots(db, watchlist.user_id, symbols)
+    snapshots = _recent_snapshots_bulk(db, watchlist.user_id, symbols)
 
     rows: list[dict] = []
     now = datetime.now(timezone.utc)
@@ -346,11 +349,12 @@ def get_watchlist_changes(
         bars = bundle.get("bars")
         quote = _quote_from_bars(symbol, bars) if bars else None
         baseline = get_baseline(symbol, bars=bars) if bars else None
-        prior = snapshots.get(symbol)
+        payloads = [_snapshot_payload(row) for row in snapshots.get(symbol, [])]
+        prior = select_comparison_snapshot(payloads, now=now)
         row = diff_symbol(
             symbol,
             sector=sector_by_symbol.get(symbol, ""),
-            snapshot=None if prior is None else _snapshot_payload(prior),
+            snapshot=prior,
             quote=quote,
             baseline=baseline,
             current_bar=bars[-1] if bars else None,

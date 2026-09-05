@@ -35,10 +35,15 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [sensitivity, setSensitivity] = useState('balanced')
   const [showAllMeaningful, setShowAllMeaningful] = useState(false)
+  const [isPolling, setIsPolling] = useState(false)
 
   const refresh = useCallback(
-    async (nextSensitivity, preferredId) => {
-      setLoading(true)
+    async (nextSensitivity, preferredId, { silent = false } = {}) => {
+      if (silent) {
+        setIsPolling(true)
+      } else {
+        setLoading(true)
+      }
       setError(null)
       try {
         const payload = await loadDashboardData(nextSensitivity ?? sensitivity, preferredId ?? selectedId)
@@ -49,9 +54,18 @@ export default function App() {
           setSelectedId(resolvedId)
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load watchlist')
+        // A silent background poll failing shouldn't blow away a working
+        // dashboard with an error screen — just skip this tick and try
+        // again next interval. A manual/initial load still surfaces it.
+        if (!silent) {
+          setError(err instanceof Error ? err.message : 'Failed to load watchlist')
+        }
       } finally {
-        setLoading(false)
+        if (silent) {
+          setIsPolling(false)
+        } else {
+          setLoading(false)
+        }
       }
     },
     [sensitivity, selectedId],
@@ -59,6 +73,21 @@ export default function App() {
 
   useEffect(() => {
     refresh(sensitivity, selectedId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sensitivity, selectedId])
+
+  // Background auto-refresh: quietly re-pull live prices/scores every 45s
+  // so the dashboard feels current without the user hitting Refresh. Paused
+  // while the tab is hidden so it doesn't burn API calls in a background
+  // tab, and paused if a manual load is already in flight.
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      if (loading) return
+      refresh(sensitivity, selectedId, { silent: true })
+    }
+    const intervalId = window.setInterval(tick, 45000)
+    return () => window.clearInterval(intervalId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sensitivity, selectedId])
 
@@ -137,7 +166,12 @@ export default function App() {
 
   useEffect(() => {
     setShowAllMeaningful(false)
-  }, [data?.watchlist_id, data?.viewed_at])
+    // Deliberately watchlist_id only — viewed_at now changes on every
+    // background auto-refresh poll too, and resetting this on each poll
+    // would collapse an expanded digest list out from under the user
+    // while they're reading it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.watchlist_id])
 
   const isEmpty = !loading && Boolean(data) && changes.length === 0
 
@@ -201,6 +235,15 @@ export default function App() {
           >
             Refresh
           </button>
+          <span
+            className="flex items-center gap-1 text-[11px] text-zinc-400"
+            title="Auto-refreshes every 45 seconds while this tab is open"
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${isPolling ? 'bg-emerald-500' : 'bg-zinc-300'}`}
+            />
+            {isPolling ? 'Updating…' : 'Live'}
+          </span>
           <AlertSettings
             watchlist={data?.watchlist}
             onSave={handleSaveAlertSettings}
