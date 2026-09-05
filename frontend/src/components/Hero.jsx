@@ -40,7 +40,9 @@ export default function Hero({
       ) : (
         <>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">
-            Welcome back, {changeCountLabel(changeCount)} since your last visit
+            {changeCount === 0
+              ? 'Nothing on your list needs your attention right now.'
+              : `${changeCountLabel(changeCount)} worth a look since your last visit.`}
           </h1>
           {digestLine ? (
             <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-800">
@@ -53,7 +55,9 @@ export default function Hero({
           )}
           <p className="mt-2 text-sm text-zinc-500">
             {when
-              ? `Prior snapshot ${when}. Ranked by Attention Score.`
+              ? changeCount === 0
+                ? `That's a finding, not an empty dashboard — ranked against your visit on ${when}.`
+                : `Prior snapshot ${when}. Ranked by Attention Score.`
               : 'First visit — we are storing a baseline for next time.'}
             {marketStatus === 'closed' ? ' US cash session is closed.' : ''}
             {stale && updated ? ` Last updated ${updated}.` : ''}

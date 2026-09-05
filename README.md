@@ -21,7 +21,7 @@ whose reasoning can't be explained on demand.
 - **Watchlist CRUD** — create a watchlist, add/remove symbols, duplicates
   blocked at the database level
 - **Real market data** — live quotes and historical OHLCV via `yfinance`
-  (free tier; data can run ~15 min behind the live tape — see
+  (free tier; data can run behind the live tape — see
   *Known limitations* below)
 - **Attention Score engine** — `0.35×price + 0.30×z_score + 0.20×volume +
   0.15×volatility`, bucketed into Normal / Moderate / Important /
@@ -34,6 +34,18 @@ whose reasoning can't be explained on demand.
   unusually on the same comparison, they're flagged
   `sector_correlation` (a sector-wide move) instead of
   `stock_specific`, with a dashboard banner
+- **Portfolio diversification panel** — a pairwise return-correlation
+  matrix across every symbol in the watchlist, an "effective independent
+  bets" score (how concentrated the list actually is, not just how many
+  names are on it), the single closest-correlated pair, and "least
+  correlated to add" suggestions. Undefined correlation (too little
+  overlap, or a symbol with zero variance) returns `None` rather than a
+  fake `0`
+- **Feed transparency panel** — every `/changes` response reports how
+  many symbols' data was applied vs rejected this cycle, the cycle time,
+  and an overall feed status (`healthy` / `stale` / `disagree` /
+  `outage`), so the resilience layer is visible in the UI, not just
+  logged server-side
 - **Sensitivity presets** — Conservative / Balanced / Aggressive shift the
   classification thresholds live from the dashboard:
   | Preset | Moderate | Important | Significant |
@@ -61,11 +73,6 @@ whose reasoning can't be explained on demand.
   (`Watchlist.alerts_enabled` / `alert_threshold`); when a symbol's score
   crosses it on a visit, a browser notification fires (Notification API,
   foreground only — no server-side push)
-- **Background auto-refresh** — polls `/changes` every 45s while the tab is
-  visible (pauses when hidden or while a manual load is in flight), fails
-  silently rather than showing an error on a missed poll, and still fires
-  Attention Score alerts on each tick — so the dashboard stays current, and
-  a threshold crossing is caught, without the user hitting Refresh
 
 ## Stack
 
@@ -92,13 +99,15 @@ backend/
       snapshot_diff.py       # snapshot vs current → per-row change + summary
       baseline.py            # 24h rolling baseline (Redis-cached)
       market_data.py         # yfinance wrapper: retries, circuit breaker, stale/closed detection, symbol search
+      diversification.py     # pairwise correlation matrix, independent-bets score, closest pair
     models/                  # SQLAlchemy models (Watchlist, WatchlistItem, MarketSnapshot)
     routes/
-      watchlists.py          # CRUD + /changes (the core endpoint) + alert-settings
+      watchlists.py          # CRUD + /changes (core endpoint) + alert-settings + feed status
       market.py               # /market/{symbol}, /market/{symbol}/ohlcv, /market/search
-  tests/                     # 58 unit tests, no DB/network required
+  tests/                     # 61 unit tests, no DB/network required
 
 frontend/
+  .env.example               # optional VITE_API_URL override (defaults to 127.0.0.1:8000)
   src/
     App.jsx                  # dashboard shell, sensitivity toggle, refresh
     api.js                   # backend calls incl. force_fail/force_stale/force_market test params
@@ -111,6 +120,8 @@ frontend/
       AddStockForm.jsx
       SymbolAutocomplete.jsx   # ticker/company-name search dropdown
       AlertSettings.jsx        # Attention Score alert threshold + browser notifications
+      DiversificationPanel.jsx # correlation matrix + independent-bets score
+      FeedPanel.jsx            # feed health status, applied/rejected counts, cycle time
       DataStatusBadge.jsx      # "Last traded" / "Data delayed" badge
       PriceChart.jsx
     pages/
@@ -139,6 +150,8 @@ npm install
 npm run dev
 ```
 Runs at whatever port Vite prints (usually `http://localhost:5173`).
+`VITE_API_URL` is optional — see `.env.example` — the app defaults to
+`http://127.0.0.1:8000` if it isn't set.
 
 Redis is optional for local dev — if it isn't running, baseline
 computation just runs live instead of reading from cache. No setup
@@ -146,7 +159,7 @@ required to demo.
 
 ## Testing
 
-### Backend (58 tests, no DB or network needed)
+### Backend (61 tests, no DB or network needed)
 ```bash
 cd backend
 python -m unittest discover tests -v
@@ -155,15 +168,15 @@ python -m unittest discover tests -v
 ### Manual end-to-end checklist
 See `docs/roadmap.md` for the full manual QA checklist (watchlist
 lifecycle, resilience via `force_fail`/`force_stale`/`force_market` query
-params, sensitivity toggle, digest mode, sector correlation, mobile
-responsiveness).
+params, sensitivity toggle, digest mode, sector correlation, diversification
+panel, feed status, mobile responsiveness).
 
 ## Known limitations (by design, not oversight)
 
-- **Data is not tick-by-tick real-time.** `yfinance`'s free tier is
-  typically ~15 minutes delayed during market hours. The app is honest
-  about this via `stale` and `market_status` fields rather than
-  pretending to be a live terminal.
+- **Data is not tick-by-tick real-time.** `yfinance`'s free tier can run
+  behind the live tape during market hours. The app is honest about this
+  via `stale` and `market_status` fields rather than pretending to be a
+  live terminal.
 - **No auth yet.** Single hardcoded `user_id=1` for the demo — the
   schema is already multi-user shaped (`user_id` on every watchlist), so
   adding JWT auth is additive, not a redesign.
@@ -174,6 +187,10 @@ responsiveness).
   the tab is open — a threshold crossing while the tab is closed is
   missed. The threshold itself is still persisted server-side per
   watchlist, so this is a delivery-channel limitation, not a data one.
+- **Correlation needs history.** `diversification.py` returns `None` for
+  a pair without enough overlapping return data (or zero variance)
+  rather than a misleading `0` — so a very new symbol may not show a
+  correlation figure yet.
 
 ## Possible next steps
 
