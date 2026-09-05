@@ -6,3 +6,4 @@ redis==5.0.8
 yfinance==1.7.0
 python-dotenv==1.0.1
 pydantic==2.9.2
+httpx==0.27.2
