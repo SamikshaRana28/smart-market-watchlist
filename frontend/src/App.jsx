@@ -1,10 +1,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { addStock, createWatchlist, loadDashboardData, removeStock, updateAlertSettings } from './api.js'
+import {
+  addStock,
+  createWatchlist,
+  fetchDiversification,
+  loadDashboardData,
+  removeStock,
+  updateAlertSettings,
+} from './api.js'
 import AddStockForm from './components/AddStockForm.jsx'
 import AlertSettings from './components/AlertSettings.jsx'
 import ChangeCard from './components/ChangeCard.jsx'
+import DiversificationPanel from './components/DiversificationPanel.jsx'
+import FeedPanel from './components/FeedPanel.jsx'
 import Hero from './components/Hero.jsx'
 import WatchlistSwitcher from './components/WatchlistSwitcher.jsx'
 import WatchlistTable from './components/WatchlistTable.jsx'
@@ -36,6 +45,9 @@ export default function App() {
   const [sensitivity, setSensitivity] = useState('balanced')
   const [showAllMeaningful, setShowAllMeaningful] = useState(false)
   const [isPolling, setIsPolling] = useState(false)
+  const [diversification, setDiversification] = useState(null)
+  const [diversificationLoading, setDiversificationLoading] = useState(false)
+  const [addingSuggestion, setAddingSuggestion] = useState(null)
 
   const refresh = useCallback(
     async (nextSensitivity, preferredId, { silent = false } = {}) => {
@@ -124,13 +136,51 @@ export default function App() {
 
   const watchlistId = data?.watchlist?.id
 
+  // Correlation/independent-bets panel — its own endpoint (real OHLCV history
+  // per symbol), so it's fetched separately from /changes and only when the
+  // watchlist itself changes, not on every 45s poll tick.
+  const loadDiversification = useCallback(async (id) => {
+    if (!id) return
+    setDiversificationLoading(true)
+    try {
+      const payload = await fetchDiversification(id)
+      setDiversification(payload)
+    } catch {
+      // Non-critical side panel — a failure here shouldn't blow up the
+      // main dashboard, just leave the previous (or empty) panel state.
+    } finally {
+      setDiversificationLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (watchlistId) loadDiversification(watchlistId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchlistId])
+
   const handleAddStock = useCallback(
     async ({ symbol, sector }) => {
       if (!watchlistId) return
       await addStock(watchlistId, { symbol, sector })
       await refresh(sensitivity, String(watchlistId))
+      await loadDiversification(watchlistId)
     },
-    [watchlistId, refresh, sensitivity],
+    [watchlistId, refresh, sensitivity, loadDiversification],
+  )
+
+  const handleAddSuggestion = useCallback(
+    async (symbol) => {
+      if (!watchlistId) return
+      setAddingSuggestion(symbol)
+      try {
+        await addStock(watchlistId, { symbol, sector: '' })
+        await refresh(sensitivity, String(watchlistId))
+        await loadDiversification(watchlistId)
+      } finally {
+        setAddingSuggestion(null)
+      }
+    },
+    [watchlistId, refresh, sensitivity, loadDiversification],
   )
 
   const handleRemoveStock = useCallback(
@@ -138,8 +188,34 @@ export default function App() {
       if (!watchlistId) return
       await removeStock(watchlistId, symbol)
       await refresh(sensitivity, String(watchlistId))
+      await loadDiversification(watchlistId)
     },
-    [watchlistId, refresh, sensitivity],
+    [watchlistId, refresh, sensitivity, loadDiversification],
+  )
+
+  // Feed panel simulate buttons — a single-select view over the three
+  // independent debug query params (force_fail/force_stale/force_disagree)
+  // api.js already forwards from the URL on every request.
+  const simulateStatus = useMemo(() => {
+    if (searchParams.get('force_fail') === 'true') return 'outage'
+    if (searchParams.get('force_disagree') === 'true') return 'disagree'
+    if (searchParams.get('force_stale') === 'true') return 'stale'
+    return 'healthy'
+  }, [searchParams])
+
+  const handleSimulate = useCallback(
+    (status) => {
+      const next = new URLSearchParams(searchParams)
+      next.delete('force_fail')
+      next.delete('force_stale')
+      next.delete('force_disagree')
+      if (status === 'outage') next.set('force_fail', 'true')
+      else if (status === 'stale') next.set('force_stale', 'true')
+      else if (status === 'disagree') next.set('force_disagree', 'true')
+      setSearchParams(next, { replace: true })
+      refresh(sensitivity, watchlistId != null ? String(watchlistId) : selectedId)
+    },
+    [searchParams, setSearchParams, refresh, sensitivity, watchlistId, selectedId],
   )
 
   const handleSaveAlertSettings = useCallback(
@@ -204,7 +280,7 @@ export default function App() {
   }, [data, changes])
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
+    <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <WatchlistSwitcher
           watchlists={watchlists}
@@ -291,51 +367,68 @@ export default function App() {
           </p>
         </div>
       ) : (
-        <>
-          <section>
-            <div className="mb-3 flex items-baseline justify-between">
-              <h2 className="text-sm font-semibold text-zinc-900">Worth your attention</h2>
-              <p className="text-xs text-zinc-500">Sorted by Attention Score</p>
-            </div>
-            {loading && !data ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {[0, 1, 2].map((key) => (
-                  <div
-                    key={key}
-                    className="h-32 animate-pulse rounded-xl border border-zinc-200 bg-white"
-                  />
-                ))}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="flex flex-col gap-6">
+            <section>
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 className="text-sm font-semibold text-zinc-900">Worth your attention</h2>
+                <p className="text-xs text-zinc-500">Sorted by Attention Score</p>
               </div>
-            ) : meaningful.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-zinc-200 bg-white px-4 py-6 text-sm text-zinc-500">
-                Nothing unusual versus your last visit. Full list is below.
-              </p>
-            ) : (
-              <>
+              {loading && !data ? (
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {visibleMeaningful.map((row) => (
-                    <ChangeCard key={row.symbol} row={row} />
+                  {[0, 1, 2].map((key) => (
+                    <div
+                      key={key}
+                      className="h-32 animate-pulse rounded-xl border border-zinc-200 bg-white"
+                    />
                   ))}
                 </div>
-                {hiddenCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllMeaningful(true)}
-                    className="mt-3 w-full rounded-lg border border-dashed border-zinc-300 bg-white px-4 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
-                  >
-                    Show {hiddenCount} more flagged stock{hiddenCount === 1 ? '' : 's'}
-                  </button>
-                )}
-              </>
-            )}
-          </section>
+              ) : meaningful.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-zinc-200 bg-white px-4 py-6 text-sm text-zinc-500">
+                  Nothing unusual versus your last visit. Full list is below.
+                </p>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {visibleMeaningful.map((row) => (
+                      <ChangeCard key={row.symbol} row={row} />
+                    ))}
+                  </div>
+                  {hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllMeaningful(true)}
+                      className="mt-3 w-full rounded-lg border border-dashed border-zinc-300 bg-white px-4 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
+                    >
+                      Show {hiddenCount} more flagged stock{hiddenCount === 1 ? '' : 's'}
+                    </button>
+                  )}
+                </>
+              )}
+            </section>
 
-          {loading && !data ? (
-            <div className="h-48 animate-pulse rounded-2xl border border-zinc-200 bg-white" />
-          ) : (
-            <WatchlistTable rows={changes} onRemove={handleRemoveStock} />
-          )}
-        </>
+            {loading && !data ? (
+              <div className="h-48 animate-pulse rounded-2xl border border-zinc-200 bg-white" />
+            ) : (
+              <WatchlistTable rows={changes} onRemove={handleRemoveStock} />
+            )}
+          </div>
+
+          <aside className="flex flex-col gap-6">
+            <DiversificationPanel
+              data={diversification}
+              loading={diversificationLoading}
+              onAddSuggestion={handleAddSuggestion}
+              addingSymbol={addingSuggestion}
+            />
+            <FeedPanel
+              feed={data?.feed}
+              simulateStatus={simulateStatus}
+              onSimulate={handleSimulate}
+              loading={loading && !data}
+            />
+          </aside>
+        </div>
       )}
     </main>
   )

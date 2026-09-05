@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +12,23 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.baseline import get_baseline
 from app.core.change_engine import DEFAULT_THRESHOLDS, SENSITIVITY_PRESETS
-from app.core.market_data import fetch_ohlcv_status, set_debug_overrides, us_equity_market_status
+from app.core.diversification import (
+    adds_the_least,
+    average_pairwise_correlation,
+    build_correlation_matrix,
+    closest_pair,
+    effective_independent_bets,
+    largest_sector,
+    lookup_correlation,
+    rank_addition_candidates,
+    returns_from_closes,
+)
+from app.core.market_data import (
+    fetch_ohlcv,
+    fetch_ohlcv_status,
+    set_debug_overrides,
+    us_equity_market_status,
+)
 from app.core.snapshot_diff import (
     apply_sector_flags,
     build_summary,
@@ -44,6 +61,17 @@ KNOWN_SECTORS = {
     "NVDA": "Technology",
     "JPM": "Financials",
 }
+
+# Small, deliberately-curated universe (spans several sectors, not the whole
+# tradable market) used to suggest an addition that's least correlated to
+# what the user already holds. Keeping this short keeps /diversification fast
+# — each new name costs a real OHLCV fetch — while still spanning enough
+# sectors for the suggestion to be meaningfully different from the book.
+DIVERSIFICATION_CANDIDATES = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V",
+    "DIS", "KO", "PEP", "WMT", "XOM", "PFE", "JNJ", "SBUX", "NKE", "IBM",
+]
+DIVERSIFICATION_TRADING_DAYS = 30
 
 router = APIRouter(prefix="/watchlists", tags=["watchlists"])
 
@@ -327,6 +355,16 @@ def get_stock_detail(
     }
 
 
+# How the dominant-reason badge (🔊 volume spike / 📈 breakout / etc.) picks
+# its label — a fixed keyword→condition lookup, not a trained model. Surfaced
+# on the Feed panel so the "why" behind headlines is as auditable as the
+# Attention Score math itself.
+HEADLINE_MODEL = "rule-based lexicon"
+# Matches the 45s interval App.jsx actually polls /changes at — kept as one
+# constant so the Feed panel can't drift out of sync with the real behavior.
+POLLING_INTERVAL_SECONDS = 45
+
+
 @router.get("/{watchlist_id}/changes")
 def get_watchlist_changes(
     watchlist_id: int,
@@ -334,6 +372,7 @@ def get_watchlist_changes(
     force_fail: bool = Query(False),
     force_stale: bool = Query(False),
     force_market: str | None = Query(None),
+    force_disagree: bool = Query(False),
     sensitivity: str | None = Query(None),
 ):
     """Compare last snapshots to live data and return Attention Scores, ranked.
@@ -345,10 +384,12 @@ def get_watchlist_changes(
     `sensitivity` (conservative | balanced | aggressive) shifts the
     classify_attention cutoffs; missing or invalid values fall back to balanced.
     """
+    cycle_started = time.perf_counter()
     set_debug_overrides(
         force_fail=force_fail,
         force_stale=force_stale,
         force_market=force_market,
+        force_disagree=force_disagree,
     )
     thresholds = _thresholds_for(sensitivity)
     watchlist = _watchlist_or_404(db, watchlist_id)
@@ -363,9 +404,25 @@ def get_watchlist_changes(
 
     rows: list[dict] = []
     now = datetime.now(timezone.utc)
+    bars_fetched = 0
+    applied = 0
+    rejected = 0
 
     for symbol in symbols:
-        bundle = fetch_ohlcv_status(symbol)
+        try:
+            bundle = fetch_ohlcv_status(symbol)
+        except Exception:
+            # Total outage (circuit open, nothing cached yet for a brand-new
+            # symbol): degrade this one row to "no data" instead of failing
+            # the whole dashboard load — the same resilience story as a
+            # stale/cached fallback, just with nothing to fall back to.
+            bundle = {
+                "bars": None,
+                "stale": True,
+                "last_updated": None,
+                "market_status": us_equity_market_status(now),
+                "sources_disagree": False,
+            }
         bars = bundle.get("bars")
         quote = _quote_from_bars(symbol, bars) if bars else None
         baseline = get_baseline(symbol, bars=bars) if bars else None
@@ -383,9 +440,12 @@ def get_watchlist_changes(
         row["stale"] = bundle["stale"]
         row["last_updated"] = bundle["last_updated"]
         row["market_status"] = bundle["market_status"]
+        row["sources_disagree"] = bundle.get("sources_disagree", False)
         rows.append(row)
 
         if quote is not None:
+            applied += 1
+            bars_fetched += len(bars or [])
             db.add(
                 MarketSnapshot(
                     user_id=watchlist.user_id,
@@ -395,6 +455,8 @@ def get_watchlist_changes(
                     timestamp=now,
                 )
             )
+        else:
+            rejected += 1
 
     ranked = rank_changes(apply_sector_flags(rows))
     previous_viewed = watchlist.last_viewed_at
@@ -402,13 +464,27 @@ def get_watchlist_changes(
     watchlist.last_viewed_at = now
     db.commit()
 
+    stored_signals = (
+        db.query(MarketSnapshot).filter(MarketSnapshot.user_id == watchlist.user_id).count()
+    )
+    any_stale = any(bool(row.get("stale")) for row in ranked)
+    any_disagree = any(bool(row.get("sources_disagree")) for row in ranked)
+    if force_fail or rejected > 0 and applied == 0 and symbols:
+        feed_status = "outage"
+    elif any_disagree:
+        feed_status = "disagree"
+    elif any_stale:
+        feed_status = "stale"
+    else:
+        feed_status = "healthy"
+
     return {
         "watchlist_id": watchlist.id,
         "user_id": watchlist.user_id,
         "last_viewed_at": previous_viewed.isoformat() if previous_viewed else None,
         "viewed_at": now.isoformat(),
         "summary": summary,
-        "stale": any(bool(row.get("stale")) for row in ranked),
+        "stale": any_stale,
         "last_updated": max(
             (row["last_updated"] for row in ranked if row.get("last_updated")),
             default=None,
@@ -423,6 +499,106 @@ def get_watchlist_changes(
         "alert_threshold": watchlist.alert_threshold,
         "triggered_alerts": _triggered_alerts(watchlist, ranked),
         "changes": ranked,
+        "feed": {
+            "status": feed_status,
+            "sources_disagree": any_disagree,
+            "polling_interval_seconds": POLLING_INTERVAL_SECONDS,
+            "cycle_time_ms": round((time.perf_counter() - cycle_started) * 1000),
+            "applied": applied,
+            "rejected": rejected,
+            "headline_model": HEADLINE_MODEL,
+            "stored_signals": stored_signals,
+            "bars_fetched": bars_fetched,
+        },
+    }
+
+
+@router.get("/{watchlist_id}/diversification")
+def get_watchlist_diversification(watchlist_id: int, db: Session = Depends(get_db)):
+    """Portfolio-shape metrics: pairwise correlation, effective independent
+    bets, the most-redundant pair, the least-redundant holding, the largest
+    sector, and a couple of not-yet-held names that would diversify the book
+    the most if added.
+
+    Correlation is computed from `DIVERSIFICATION_TRADING_DAYS` of daily
+    returns, so it needs at least a couple of priced symbols to say anything;
+    a 0- or 1-name watchlist gets a minimal, honest response instead of a
+    fabricated score.
+    """
+    watchlist = _watchlist_or_404(db, watchlist_id)
+    items = list(watchlist.items)
+    symbols = [item.symbol for item in items]
+    sector_by_symbol = {
+        item.symbol: (item.sector or "").strip() or KNOWN_SECTORS.get(item.symbol, "")
+        for item in items
+    }
+    sector = largest_sector(sector_by_symbol)
+    sector_payload = None if sector is None else {"sector": sector[0], "pct": round(sector[1], 1)}
+
+    if len(symbols) < 2:
+        return {
+            "watchlist_id": watchlist.id,
+            "n": len(symbols),
+            "independent_bets": float(len(symbols)),
+            "avg_pair_correlation": None,
+            "closest_pair": None,
+            "adds_least": None,
+            "largest_sector": sector_payload,
+            "matrix": {"symbols": symbols, "values": [[1.0]] if symbols else []},
+            "suggestions": [],
+            "insufficient_data": True,
+        }
+
+    returns_by_symbol: dict[str, list[float]] = {}
+    for symbol in symbols:
+        bars = fetch_ohlcv(symbol, trading_days=DIVERSIFICATION_TRADING_DAYS)
+        if bars:
+            closes = [bar["close"] for bar in bars]
+            returns = returns_from_closes(closes)
+            if returns:
+                returns_by_symbol[symbol] = returns
+
+    matrix = build_correlation_matrix(returns_by_symbol)
+    avg_corr = average_pairwise_correlation(matrix)
+    bets = effective_independent_bets(len(symbols), avg_corr)
+    pair = closest_pair(matrix)
+    least = adds_the_least(symbols, matrix)
+
+    candidate_returns: dict[str, list[float]] = {}
+    for symbol in DIVERSIFICATION_CANDIDATES:
+        if symbol in returns_by_symbol:
+            continue
+        bars = fetch_ohlcv(symbol, trading_days=DIVERSIFICATION_TRADING_DAYS)
+        if bars:
+            closes = [bar["close"] for bar in bars]
+            returns = returns_from_closes(closes)
+            if returns:
+                candidate_returns[symbol] = returns
+
+    suggestions = rank_addition_candidates(candidate_returns, returns_by_symbol, limit=3)
+
+    grid = [
+        [lookup_correlation(a, b, matrix) for b in symbols]
+        for a in symbols
+    ]
+
+    return {
+        "watchlist_id": watchlist.id,
+        "n": len(symbols),
+        "independent_bets": round(bets, 2),
+        "avg_pair_correlation": None if avg_corr is None else round(avg_corr, 2),
+        "closest_pair": (
+            None if pair is None else {**pair, "correlation": round(pair["correlation"], 2)}
+        ),
+        "adds_least": (
+            None if least is None else {"symbol": least[0], "avg_correlation": round(least[1], 2)}
+        ),
+        "largest_sector": sector_payload,
+        "matrix": {"symbols": symbols, "values": grid},
+        "suggestions": [
+            {"symbol": row["symbol"], "avg_correlation": round(row["avg_correlation"], 2)}
+            for row in suggestions
+        ],
     }
 
 

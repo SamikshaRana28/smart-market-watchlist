@@ -10,7 +10,7 @@ function debugQuery() {
   if (typeof window === 'undefined') return ''
   const params = new URLSearchParams(window.location.search)
   const out = new URLSearchParams()
-  for (const key of ['force_fail', 'force_stale', 'force_market']) {
+  for (const key of ['force_fail', 'force_stale', 'force_market', 'force_disagree']) {
     if (params.has(key)) out.set(key, params.get(key))
   }
   const serialized = out.toString()
@@ -83,6 +83,10 @@ export function updateAlertSettings(watchlistId, { enabled, threshold }) {
 export function fetchWatchlistChanges(watchlistId, sensitivity) {
   const query = sensitivity ? `?sensitivity=${encodeURIComponent(sensitivity)}` : ''
   return request(`/watchlists/${watchlistId}/changes${query}`)
+}
+
+export function fetchDiversification(watchlistId) {
+  return request(`/watchlists/${watchlistId}/diversification`)
 }
 
 export function fetchStockDetail(watchlistId, symbol) {

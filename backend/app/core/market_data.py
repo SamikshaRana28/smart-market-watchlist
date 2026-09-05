@@ -48,6 +48,11 @@ OHLCV_RANGES: dict[str, dict[str, str]] = {
 debug_force_fail: ContextVar[bool] = ContextVar("debug_force_fail", default=False)
 debug_force_stale: ContextVar[bool] = ContextVar("debug_force_stale", default=False)
 debug_force_market: ContextVar[str | None] = ContextVar("debug_force_market", default=None)
+# "Sources disagree" simulate mode: this app has one provider (yfinance), so
+# there's no second feed to genuinely disagree with — this flag exists purely
+# to demo the UI state a multi-provider setup would surface, same spirit as
+# force_fail/force_stale simulating conditions that are hard to hit on demand.
+debug_force_disagree: ContextVar[bool] = ContextVar("debug_force_disagree", default=False)
 
 
 @dataclass
@@ -81,6 +86,7 @@ def set_debug_overrides(
     force_fail: bool = False,
     force_stale: bool = False,
     force_market: str | None = None,
+    force_disagree: bool = False,
 ) -> None:
     debug_force_fail.set(bool(force_fail))
     debug_force_stale.set(bool(force_stale))
@@ -88,6 +94,13 @@ def set_debug_overrides(
     if market not in ("open", "closed"):
         market = None
     debug_force_market.set(market)
+    debug_force_disagree.set(bool(force_disagree))
+
+
+def sources_disagree_forced() -> bool:
+    if debug_force_disagree.get():
+        return True
+    return os.getenv("STOCKLYTIC_FORCE_DISAGREE", "").lower() in {"1", "true", "yes"}
 
 
 def _now() -> datetime:
@@ -151,6 +164,7 @@ def freshness_fields(
         "stale": stale,
         "last_updated": fetched.isoformat() if fetched else None,
         "market_status": status,
+        "sources_disagree": sources_disagree_forced(),
     }
 
 
@@ -285,14 +299,14 @@ def fetch_quote(symbol: str) -> dict[str, Any] | None:
         bucket.quote = {
             k: v
             for k, v in payload.items()
-            if k not in {"stale", "last_updated", "market_status"}
+            if k not in {"stale", "last_updated", "market_status", "sources_disagree"}
         }
         bucket.quote_fetched_at = _now()
 
     raw, meta = _guarded(ticker_symbol, loader, read_cache, write_cache)
     if raw is None:
         return None
-    core = {k: v for k, v in raw.items() if k not in {"stale", "last_updated", "market_status"}}
+    core = {k: v for k, v in raw.items() if k not in {"stale", "last_updated", "market_status", "sources_disagree"}}
     return {**core, **meta}
 
 
