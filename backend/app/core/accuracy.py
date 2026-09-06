@@ -8,7 +8,7 @@ app grading its own signal instead of asserting significance and walking away.
 
 from __future__ import annotations
 
-EVALUATION_WINDOW_DAYS = 0
+EVALUATION_WINDOW_DAYS = 3
 MOVED_FURTHER_THRESHOLD = 0.03  # 3% either direction counts as "moved further"
 
 

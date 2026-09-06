@@ -79,6 +79,14 @@ whose reasoning can't be explained on demand.
   (`Watchlist.alerts_enabled` / `alert_threshold`); when a symbol's score
   crosses it on a visit, a browser notification fires (Notification API,
   foreground only — no server-side push)
+- **Score Accuracy Tracker (self-audit)** — every symbol flagged Moderate,
+  Important, or Significant is recorded with its price at that moment.
+  `EVALUATION_WINDOW_DAYS` (3) later, `/watchlists/accuracy` checks whether
+  the price actually moved ≥3% further and reports an aggregate hit rate,
+  broken down by label — the app grading its own signal against real
+  outcomes instead of just asserting significance and moving on. Deduped to
+  one flagged event per symbol per calendar day so the 45s auto-refresh
+  doesn't spam duplicate rows for the same flag
 
 ## Stack
 
@@ -106,11 +114,14 @@ backend/
       baseline.py            # 24h rolling baseline (Redis-cached)
       market_data.py         # yfinance wrapper: retries, circuit breaker, stale/closed detection, symbol search
       diversification.py     # pairwise correlation matrix, independent-bets score, closest pair
-    models/                  # SQLAlchemy models (Watchlist, WatchlistItem, MarketSnapshot)
+      accuracy.py             # Score Accuracy Tracker: evaluation window, hit-rate summary
+    models/                  # SQLAlchemy models (Watchlist, WatchlistItem, MarketSnapshot, FlaggedEvent)
     routes/
-      watchlists.py          # CRUD + /changes (core endpoint) + alert-settings + feed status
+      watchlists.py          # CRUD + /changes (core endpoint) + alert-settings + feed status + /accuracy + /diversification
       market.py               # /market/{symbol}, /market/{symbol}/ohlcv, /market/search
-  tests/                     # 61 unit tests, no DB/network required
+  tests/                     # 121 unit tests — 118 pure-logic (no DB/network); 3 route-level
+                              # tests in test_feed_status.py use a throwaway SQLite file via
+                              # FastAPI's TestClient (no live network calls; yfinance is mocked)
 
 frontend/
   .env.example               # optional VITE_API_URL override (defaults to 127.0.0.1:8000)
@@ -127,6 +138,7 @@ frontend/
       SymbolAutocomplete.jsx   # ticker/company-name search dropdown
       AlertSettings.jsx        # Attention Score alert threshold + browser notifications
       DiversificationPanel.jsx # correlation matrix + independent-bets score
+      AccuracyPanel.jsx        # Score Accuracy Tracker: hit rate, by-label breakdown
       FeedPanel.jsx            # feed health status, applied/rejected counts, cycle time
       DataStatusBadge.jsx      # "Last traded" / "Data delayed" badge
       PriceChart.jsx
@@ -165,11 +177,19 @@ required to demo.
 
 ## Testing
 
-### Backend (61 tests, no DB or network needed)
+### Backend (121 tests)
 ```bash
 cd backend
 python -m unittest discover tests -v
 ```
+118 of these are pure-logic tests (`change_engine`, `snapshot_diff`,
+`diversification`, `accuracy`, `market_data` helpers, etc.) — no DB, no
+network, run in milliseconds. The remaining 3, in `test_feed_status.py`,
+are route-level tests: they spin up a throwaway SQLite file (never the
+real dev `stocklytic.db`) behind a real FastAPI `TestClient` to exercise
+the `/changes` endpoint end-to-end, including the "total outage with
+nothing cached" path. `fetch_ohlcv_status` is mocked there too, so no
+test in the suite makes a real network call.
 
 ### Manual end-to-end checklist
 See `docs/roadmap.md` for the full manual QA checklist (watchlist
@@ -197,6 +217,12 @@ panel, feed status, mobile responsiveness).
   a pair without enough overlapping return data (or zero variance)
   rather than a misleading `0` — so a very new symbol may not show a
   correlation figure yet.
+- **The accuracy evaluation window (3 days) is short** for a genuinely
+  robust significance test — it was picked so the self-audit produces
+  real hit-rate numbers within a normal demo/review timeframe rather than
+  requiring weeks of flagged history first. A production version would
+  likely use a longer window (and possibly several windows per flag) for
+  a more statistically meaningful hit rate.
 
 ## Possible next steps
 
