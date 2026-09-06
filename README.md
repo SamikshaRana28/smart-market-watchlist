@@ -69,6 +69,12 @@ whose reasoning can't be explained on demand.
 - **Symbol search/autocomplete** — type a ticker or a company name (e.g.
   "google") when adding a stock; matches a curated name list plus a live
   `yfinance` lookup, so you don't need to already know the exact ticker
+- **NSE (India) support alongside US markets** — add a `.NS`/`.BO` ticker
+  (e.g. `TCS.NS`, `RELIANCE.NS` — 20 common NSE names are in the curated
+  autocomplete list) and it's priced in ₹ and judged against NSE trading
+  hours (9:15am–3:30pm IST), while a US ticker in the *same* watchlist
+  stays in $ on US hours (9:30am–4pm ET) — each symbol is evaluated on
+  its own exchange's clock and currency, not one assumed for everything
 - **Attention Score alerts** — per-watchlist threshold, persisted server-side
   (`Watchlist.alerts_enabled` / `alert_threshold`); when a symbol's score
   crosses it on a visit, a browser notification fires (Notification API,
