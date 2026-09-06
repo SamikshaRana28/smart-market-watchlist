@@ -87,6 +87,9 @@ whose reasoning can't be explained on demand.
   outcomes instead of just asserting significance and moving on. Deduped to
   one flagged event per symbol per calendar day so the 45s auto-refresh
   doesn't spam duplicate rows for the same flag
+- **News context** — the stock detail page fetches recent headlines for the
+  symbol via `/market/{symbol}/news` and shows them as "related context,"
+  never as a claimed cause for a price move
 
 ## Stack
 
@@ -118,7 +121,7 @@ backend/
     models/                  # SQLAlchemy models (Watchlist, WatchlistItem, MarketSnapshot, FlaggedEvent)
     routes/
       watchlists.py          # CRUD + /changes (core endpoint) + alert-settings + feed status + /accuracy + /diversification
-      market.py               # /market/{symbol}, /market/{symbol}/ohlcv, /market/search
+      market.py               # /market/{symbol}, /market/{symbol}/ohlcv, /market/{symbol}/news, /market/search
   tests/                     # 121 unit tests — 118 pure-logic (no DB/network); 3 route-level
                               # tests in test_feed_status.py use a throwaway SQLite file via
                               # FastAPI's TestClient (no live network calls; yfinance is mocked)
@@ -130,6 +133,7 @@ frontend/
     api.js                   # backend calls incl. force_fail/force_stale/force_market test params
     format.js                # shared formatting + "what's the dominant reason" logic
     components/
+      AppShell.jsx            # page layout/frame shared across routes
       Hero.jsx               # headline + digest summary line
       ChangeCard.jsx          # ranked card view with context badges
       WatchlistTable.jsx      # full sortable table with context badges
@@ -143,7 +147,7 @@ frontend/
       DataStatusBadge.jsx      # "Last traded" / "Data delayed" badge
       PriceChart.jsx
     pages/
-      StockDetail.jsx          # per-symbol page: chart, range toggle, "why it matters"
+      StockDetail.jsx          # per-symbol page: chart, range toggle, "why it matters", related news
 
 docs/
   roadmap.md                 # phase-by-phase build log
