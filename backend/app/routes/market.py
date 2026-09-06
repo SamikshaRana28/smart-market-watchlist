@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.core.market_data import (
     OHLCV_RANGES,
+    fetch_news,
     fetch_ohlcv_range_status,
     fetch_quote,
     search_symbols,
@@ -102,3 +103,7 @@ def get_market_quote(
         )
 
     return quote
+@router.get("/{symbol}/news")
+def get_market_news(symbol: str, limit: int = Query(5, ge=1, le=10)):
+    """Recent headlines for `symbol` — related context only, never a claimed cause."""
+    return {"symbol": symbol.strip().upper(), "results": fetch_news(symbol, limit=limit)}

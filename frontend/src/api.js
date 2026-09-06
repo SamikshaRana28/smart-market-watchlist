@@ -98,7 +98,9 @@ export function fetchOhlcv(symbol, range) {
     `/market/${encodeURIComponent(symbol)}/ohlcv?range=${encodeURIComponent(range)}`,
   )
 }
-
+export function fetchNews(symbol) {
+  return request(`/market/${encodeURIComponent(symbol)}/news`)
+}
 export function searchSymbols(query, { signal } = {}) {
   const q = query.trim()
   if (!q) return Promise.resolve({ results: [] })
@@ -134,9 +136,10 @@ export async function loadDashboardData(sensitivity, preferredWatchlistId) {
 
 export async function loadSymbolDetail(symbol, range, preferredWatchlistId) {
   const { watchlist, watchlists } = await ensureWatchlist(preferredWatchlistId)
-  const [detail, ohlcv] = await Promise.all([
+  const [detail, ohlcv, news] = await Promise.all([
     fetchStockDetail(watchlist.id, symbol),
     fetchOhlcv(symbol, range),
+    fetchNews(symbol).catch(() => ({ results: [] })),
   ])
-  return { watchlist, watchlists, ...detail, ohlcv }
+  return { watchlist, watchlists, ...detail, ohlcv, news }
 }

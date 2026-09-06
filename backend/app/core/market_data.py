@@ -725,3 +725,38 @@ def _parse_ohlcv_range(
         )
 
     return rows or None
+def fetch_news(symbol: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Recent headlines for `symbol` via yfinance.
+
+    Best-effort only: never raises. This is "related context" next to the
+    Attention Score, not a claimed reason for any price move — the caller
+    should never present it as causation.
+    """
+    ticker_symbol = _normalize_symbol(symbol)
+    try:
+        raw = yf.Ticker(ticker_symbol).news or []
+    except Exception:
+        return []
+
+    items: list[dict[str, Any]] = []
+    for entry in raw[:limit]:
+        content = entry.get("content", entry)
+        title = content.get("title") or entry.get("title")
+        if not title:
+            continue
+        provider = content.get("provider")
+        publisher = (
+            provider.get("displayName") if isinstance(provider, dict) else entry.get("publisher")
+        )
+        canonical = content.get("canonicalUrl")
+        link = canonical.get("url") if isinstance(canonical, dict) else entry.get("link")
+        published = content.get("pubDate") or entry.get("providerPublishTime")
+        items.append(
+            {
+                "title": title,
+                "publisher": publisher or "",
+                "link": link or "",
+                "published": published,
+            }
+        )
+    return items

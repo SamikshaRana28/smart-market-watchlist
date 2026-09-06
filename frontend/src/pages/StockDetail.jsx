@@ -63,6 +63,7 @@ export default function StockDetail() {
   const stale = Boolean(change?.stale || payload?.stale || payload?.ohlcv?.stale)
   const marketStatus =
     change?.market_status || payload?.market_status || payload?.ohlcv?.market_status
+  const news = payload?.news?.results ?? []
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
@@ -206,6 +207,33 @@ export default function StockDetail() {
           )}
         </section>
       </div>
+
+      {news.length > 0 && (
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-zinc-900">Related headlines</h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            Recent news mentioning {symbol} — shown as context, not a claimed reason for any
+            price move.
+          </p>
+          <ul className="mt-3 space-y-3 text-sm">
+            {news.map((item) => (
+              <li key={item.link || item.title}>
+                <a
+                  href={item.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-zinc-800 hover:text-zinc-950 hover:underline"
+                >
+                  {item.title}
+                </a>
+                {item.publisher && (
+                  <p className="mt-0.5 text-xs text-zinc-500">{item.publisher}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   )
 }
