@@ -89,6 +89,10 @@ export function fetchDiversification(watchlistId) {
   return request(`/watchlists/${watchlistId}/diversification`)
 }
 
+export function fetchAccuracy() {
+  return request('/watchlists/accuracy?user_id=1')
+}
+
 export function fetchStockDetail(watchlistId, symbol) {
   return request(`/watchlists/${watchlistId}/stocks/${encodeURIComponent(symbol)}`)
 }

@@ -23,9 +23,16 @@ from app.core.diversification import (
     rank_addition_candidates,
     returns_from_closes,
 )
+from app.core.accuracy import (
+    compute_outcome_return,
+    did_move_further,
+    is_due_for_evaluation,
+    summarize as summarize_accuracy,
+)
 from app.core.market_data import (
     fetch_ohlcv,
     fetch_ohlcv_status,
+    fetch_quote,
     set_debug_overrides,
     us_equity_market_status,
     market_status_for_symbol,
@@ -39,7 +46,7 @@ from app.core.snapshot_diff import (
     select_comparison_snapshot,
 )
 from app.db import get_db
-from app.models import MarketSnapshot, Watchlist, WatchlistItem
+from app.models import FlaggedEvent, MarketSnapshot, Watchlist, WatchlistItem
 
 DEFAULT_USER_ID = 1
 
@@ -208,6 +215,37 @@ def _triggered_alerts(watchlist: Watchlist, ranked: list[dict]) -> list[str]:
         and row.get("attention_score") is not None
         and row["attention_score"] >= watchlist.alert_threshold
     ]
+
+FLAGGED_LABELS = {"Moderate", "Important", "Significant"}
+
+
+def _record_flagged_event(db: Session, watchlist: Watchlist, row: dict, now: datetime) -> None:
+    """Record a flagged Attention Score for later self-audit (see
+    app.core.accuracy). Deduped to one row per symbol per calendar day so a
+    45s poll loop doesn't spam duplicate events for the same flag."""
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    exists = (
+        db.query(FlaggedEvent)
+        .filter(
+            FlaggedEvent.user_id == watchlist.user_id,
+            FlaggedEvent.symbol == row["symbol"],
+            FlaggedEvent.flagged_at >= day_start,
+        )
+        .first()
+    )
+    if exists:
+        return
+    db.add(
+        FlaggedEvent(
+            user_id=watchlist.user_id,
+            watchlist_id=watchlist.id,
+            symbol=row["symbol"],
+            attention_label=row["attention_label"],
+            attention_score=row["attention_score"],
+            price_at_flag=row["current_price"],
+            flagged_at=now,
+        )
+    )
 
 
 def _snapshot_payload(row: MarketSnapshot) -> dict:
@@ -446,6 +484,8 @@ def get_watchlist_changes(
         row["market_status"] = bundle["market_status"]
         row["currency"] = bundle.get("currency", currency_for_symbol(symbol))
         row["sources_disagree"] = bundle.get("sources_disagree", False)
+        if row.get("status") == "compared" and row.get("attention_label") in FLAGGED_LABELS:
+            _record_flagged_event(db, watchlist, row, now)
         rows.append(row)
 
         if quote is not None:
@@ -516,6 +556,61 @@ def get_watchlist_changes(
             "bars_fetched": bars_fetched,
         },
     }
+
+@router.get("/accuracy")
+def get_accuracy(user_id: int = DEFAULT_USER_ID, db: Session = Depends(get_db)):
+    """Self-audit: of the symbols flagged Moderate/Important/Significant, how
+    many actually moved further in the days after? This grades the Attention
+    Score against real outcomes instead of just asserting significance.
+    """
+    now = datetime.now(timezone.utc)
+    due = (
+        db.query(FlaggedEvent)
+        .filter(FlaggedEvent.user_id == user_id, FlaggedEvent.evaluated.is_(False))
+        .all()
+    )
+    for event in due:
+        if not is_due_for_evaluation(event.flagged_at, now):
+            continue
+        quote = fetch_quote(event.symbol)
+        if quote is None:
+            continue
+        event.outcome_return = compute_outcome_return(event.price_at_flag, float(quote["price"]))
+        event.evaluated = True
+        event.evaluated_at = now
+    if due:
+        db.commit()
+
+    events = (
+        db.query(FlaggedEvent)
+        .filter(FlaggedEvent.user_id == user_id)
+        .order_by(FlaggedEvent.flagged_at.desc())
+        .all()
+    )
+    summary = summarize_accuracy(
+        [
+            {
+                "attention_label": e.attention_label,
+                "evaluated": e.evaluated,
+                "outcome_return": e.outcome_return,
+            }
+            for e in events
+        ]
+    )
+    recent = [
+        {
+            "symbol": e.symbol,
+            "attention_label": e.attention_label,
+            "attention_score": e.attention_score,
+            "price_at_flag": e.price_at_flag,
+            "flagged_at": e.flagged_at.isoformat(),
+            "evaluated": e.evaluated,
+            "outcome_return": e.outcome_return,
+            "moved_further": did_move_further(e.outcome_return),
+        }
+        for e in events[:20]
+    ]
+    return {"summary": summary, "recent": recent}
 
 
 @router.get("/{watchlist_id}/diversification")

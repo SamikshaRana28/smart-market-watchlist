@@ -4,11 +4,13 @@ import { useSearchParams } from 'react-router-dom'
 import {
   addStock,
   createWatchlist,
+  fetchAccuracy,
   fetchDiversification,
   loadDashboardData,
   removeStock,
   updateAlertSettings,
 } from './api.js'
+import AccuracyPanel from './components/AccuracyPanel.jsx'
 import AddStockForm from './components/AddStockForm.jsx'
 import AlertSettings from './components/AlertSettings.jsx'
 import ChangeCard from './components/ChangeCard.jsx'
@@ -48,6 +50,8 @@ export default function App() {
   const [diversification, setDiversification] = useState(null)
   const [diversificationLoading, setDiversificationLoading] = useState(false)
   const [addingSuggestion, setAddingSuggestion] = useState(null)
+  const [accuracy, setAccuracy] = useState(null)
+  const [accuracyLoading, setAccuracyLoading] = useState(false)
 
   const refresh = useCallback(
     async (nextSensitivity, preferredId, { silent = false } = {}) => {
@@ -157,6 +161,23 @@ export default function App() {
     if (watchlistId) loadDiversification(watchlistId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchlistId])
+
+  const loadAccuracy = useCallback(async () => {
+    setAccuracyLoading(true)
+    try {
+      const payload = await fetchAccuracy()
+      setAccuracy(payload)
+    } catch {
+      // Non-critical side panel — leave previous state on failure.
+    } finally {
+      setAccuracyLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadAccuracy()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleAddStock = useCallback(
     async ({ symbol, sector }) => {
@@ -415,6 +436,7 @@ export default function App() {
           </div>
 
           <aside className="flex flex-col gap-6">
+            <AccuracyPanel data={accuracy} loading={accuracyLoading} onRefresh={loadAccuracy} />
             <DiversificationPanel
               data={diversification}
               loading={diversificationLoading}
